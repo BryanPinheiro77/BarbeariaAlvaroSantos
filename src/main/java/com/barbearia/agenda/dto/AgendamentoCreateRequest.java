@@ -8,7 +8,6 @@ public record AgendamentoCreateRequest(
         Long servicoId,
         LocalDate data,
         LocalTime horarioInicio,
-        LocalTime horarioFim,
         String formaPagamentoTipo,
         String formaPagamentoModo,
         Integer lembreteMinutos

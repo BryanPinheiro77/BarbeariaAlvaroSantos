@@ -5,6 +5,7 @@ import com.barbearia.agenda.dto.ClienteResponse;
 import com.barbearia.agenda.model.Cliente;
 import com.barbearia.agenda.repository.ClienteRepository;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -15,20 +16,25 @@ import java.util.List;
 public class ClienteController {
 
     private final ClienteRepository clienteRepository;
+    private final PasswordEncoder passwordEncoder;
 
-    public ClienteController(ClienteRepository clienteRepository) {
+    public ClienteController(ClienteRepository clienteRepository,
+                             PasswordEncoder passwordEncoder) {
         this.clienteRepository = clienteRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
-    //TODO -------------- CRIAR CLIENTE --------------
     @PostMapping("/registrar")
     public ResponseEntity<ClienteResponse> criarCliente(@RequestBody ClienteCreateRequest req){
+
         Cliente cliente = new Cliente();
         cliente.setNome(req.nome());
         cliente.setEmail(req.email());
-        cliente.setSenhaHash(req.senha()); // Criptografar depois
         cliente.setTelefone(req.telefone());
         cliente.setCriadoEm(LocalDateTime.now());
+
+        // Criptografa a senha aqui
+        cliente.setSenhaHash(passwordEncoder.encode(req.senha()));
 
         Cliente salvo = clienteRepository.save(cliente);
 
@@ -42,7 +48,6 @@ public class ClienteController {
         return ResponseEntity.ok(resp);
     }
 
-    //TODO -------------- LISTAR TODOS --------------
     @GetMapping
     public ResponseEntity<List<ClienteResponse>> listarClientes() {
         var lista = clienteRepository.findAll()
@@ -59,29 +64,32 @@ public class ClienteController {
         return ResponseEntity.ok(lista);
     }
 
-    //TODO -------------- BUSCAR POR ID --------------
     @GetMapping("/{id}")
     public ResponseEntity<ClienteResponse> buscarPorId(@PathVariable("id") long id){
         return clienteRepository.findById(id).map(c -> new ClienteResponse(
-                c.getId(),
-                c.getNome(),
-                c.getEmail(),
-                c.getTelefone(),
-                c.getCriadoEm()
-        ))
-        .map(ResponseEntity::ok)
-        .orElse(ResponseEntity.notFound().build());
+                        c.getId(),
+                        c.getNome(),
+                        c.getEmail(),
+                        c.getTelefone(),
+                        c.getCriadoEm()
+                ))
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
-    //TODO -------------- ATUALIZAR CLIENTE --------------
     @PutMapping("/{id}")
-    public ResponseEntity<ClienteResponse> atualizarCliente(@PathVariable("id") long id, @RequestBody ClienteCreateRequest req){
+    public ResponseEntity<ClienteResponse> atualizarCliente(
+            @PathVariable("id") long id,
+            @RequestBody ClienteCreateRequest req){
+
         return clienteRepository.findById(id)
                 .map(cliente -> {
                     cliente.setNome(req.nome());
                     cliente.setEmail(req.email());
-                    cliente.setSenhaHash(req.senha());
                     cliente.setTelefone(req.telefone());
+
+                    // Atualiza senha criptografada
+                    cliente.setSenhaHash(passwordEncoder.encode(req.senha()));
 
                     Cliente atualizado = clienteRepository.save(cliente);
 
@@ -97,7 +105,6 @@ public class ClienteController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    //TODO -------------- DELETAR CLIENTE --------------
     @DeleteMapping("/{id}")
     public ResponseEntity<ClienteResponse> deletarCliente(@PathVariable("id") long id){
         if(!clienteRepository.existsById(id)){

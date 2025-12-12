@@ -9,6 +9,7 @@ import com.barbearia.agenda.repository.AgendamentoRepository;
 import com.barbearia.agenda.repository.ClienteRepository;
 import com.barbearia.agenda.repository.ServicoRepository;
 import com.barbearia.agenda.repository.HorarioBarbeiroRepository;
+import com.barbearia.agenda.service.AgendamentoService;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -26,17 +27,21 @@ public class AgendamentoController {
     private final ClienteRepository clienteRepo;
     private final ServicoRepository servicoRepo;
     private final HorarioBarbeiroRepository horarioRepo;
+    private final AgendamentoService agendamentoService;
 
     public AgendamentoController(
             AgendamentoRepository agendamentoRepo,
             ClienteRepository clienteRepo,
             ServicoRepository servicoRepo,
-            HorarioBarbeiroRepository horarioRepo
+            HorarioBarbeiroRepository horarioRepo,
+            AgendamentoService agendamentoService
+
     ) {
         this.agendamentoRepo = agendamentoRepo;
         this.clienteRepo = clienteRepo;
         this.servicoRepo = servicoRepo;
         this.horarioRepo = horarioRepo;
+        this.agendamentoService = agendamentoService;
     }
 
     // ====================================================================
@@ -44,39 +49,10 @@ public class AgendamentoController {
     // ====================================================================
     @PostMapping
     public ResponseEntity<?> criar(@RequestBody AgendamentoCreateRequest req) {
-
-        Cliente cliente = clienteRepo.findById(req.clienteId()).orElse(null);
-        if (cliente == null) return ResponseEntity.badRequest().body("Cliente inválido");
-
-        Servico servico = servicoRepo.findById(req.servicoId()).orElse(null);
-        if (servico == null) return ResponseEntity.badRequest().body("Serviço inválido");
-
-        LocalTime horarioFim = req.horarioInicio().plusMinutes(servico.getDuracaoMinutos());
-
-        boolean conflito = agendamentoRepo
-                .existsByDataAndHorarioInicioLessThanEqualAndHorarioFimGreaterThanEqual(
-                        req.data(), horarioFim, req.horarioInicio()
-                );
-
-        if (conflito)
-            return ResponseEntity.status(409).body("Horário já reservado!");
-
-        Agendamento a = new Agendamento();
-        a.setCliente(cliente);
-        a.setServico(servico);
-        a.setData(req.data());
-        a.setHorarioInicio(req.horarioInicio());
-        a.setHorarioFim(horarioFim);
-        a.setFormaPagamentoTipo(req.formaPagamentoTipo());
-        a.setFormaPagamentoModo(req.formaPagamentoModo());
-        a.setLembreteMinutos(req.lembreteMinutos());
-        a.setStatus(StatusAgendamento.AGENDADO);
-        a.setCriadoEm(LocalDateTime.now());
-
-        Agendamento salvo = agendamentoRepo.save(a);
-
-        return ResponseEntity.ok(toResponse(salvo));
+        Agendamento a = agendamentoService.criar(req);
+        return ResponseEntity.ok(toResponse(a));
     }
+
 
     // ====================================================================
     // ⭐ 2️⃣ HORÁRIOS DISPONÍVEIS INTELIGENTES (para vários serviços)
@@ -234,7 +210,7 @@ public class AgendamentoController {
         LocalTime fim = inicio.plusMinutes(duracaoTotal);
 
         boolean conflito = agendamentoRepo
-                .existsByDataAndHorarioInicioLessThanEqualAndHorarioFimGreaterThanEqual(
+                .existsByDataAndHorarioInicioLessThanAndHorarioFimGreaterThan(
                         data, fim, inicio
                 );
 

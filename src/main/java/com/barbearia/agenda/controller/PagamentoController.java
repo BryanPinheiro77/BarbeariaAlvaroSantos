@@ -2,11 +2,14 @@ package com.barbearia.agenda.controller;
 
 import com.barbearia.agenda.dto.PagamentoCreateRequest;
 import com.barbearia.agenda.dto.PagamentoCreateResponse;
+import com.barbearia.agenda.dto.PagamentoListDTO;
+import com.barbearia.agenda.model.Pagamento;
 import com.barbearia.agenda.service.PagamentoService;
 import jakarta.annotation.security.PermitAll;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -25,7 +28,6 @@ public class PagamentoController {
     }
 
     @PermitAll
-    @CrossOrigin(origins = "*")
     @PostMapping("/webhook")
     public ResponseEntity<?> webhook(@RequestBody Map<String, Object> payload) {
 
@@ -77,5 +79,66 @@ public class PagamentoController {
             return Long.valueOf(resource.substring(resource.lastIndexOf("/") + 1));
         }
         return Long.valueOf(resource);
+    }
+
+    //Buscar pagamento por id
+    @GetMapping("/{id}")
+    public ResponseEntity<PagamentoListDTO> buscarPorId(@PathVariable Long id) {
+        Pagamento pagamento = pagamentoService.buscarPorId(id);
+        return ResponseEntity.ok(new PagamentoListDTO(pagamento));
+    }
+
+    //Buscar pagamentos por status
+    @GetMapping
+    public ResponseEntity<List<PagamentoListDTO>> listarPorStatus(
+        @RequestParam(required = false) String status
+                ) {
+        List<Pagamento> lista = pagamentoService.listarPorStatus(status);
+        List<PagamentoListDTO> dto = lista.stream()
+                .map(PagamentoListDTO::new)
+                .toList();
+        return ResponseEntity.ok(dto);
+    }
+
+    //Buscar por agendamento
+    @GetMapping("/agendamentos/{id}")
+    public ResponseEntity<List<PagamentoListDTO>> listarPorAgendamento(@PathVariable Long id) {
+        List<Pagamento> lista = pagamentoService.listarPorAgendamento(id);
+        List<PagamentoListDTO> dto = lista.stream()
+                .map(PagamentoListDTO::new)
+                .toList();
+        return ResponseEntity.ok(dto);
+    }
+
+    //Cancelar pagamento
+    @PatchMapping("/{id}/cancelar")
+    public ResponseEntity<?> cancelar(@PathVariable Long id) {
+        Pagamento pagamento = pagamentoService.cancelar(id);
+        return ResponseEntity.ok(new PagamentoListDTO(pagamento));
+    }
+
+    //Confirmar pagamento manualmente
+    @PatchMapping("/{id}/confirmar-manual")
+    public ResponseEntity<PagamentoListDTO> confirmarManual(@PathVariable Long id) {
+        Pagamento pagamento = pagamentoService.confirmarManual(id);
+        return ResponseEntity.ok(new PagamentoListDTO(pagamento));
+    }
+
+    // -------------- MOCK WEBHOOK PARA TESTES --------------
+    @PostMapping("/mock/webhook/{id}")
+    public ResponseEntity<?> mockWebhook(
+            @PathVariable Long id,
+            @RequestParam String status
+    ) {
+        System.out.println("🧪 MOCK WEBHOOK → Pagamento " + id + " | Status = " + status);
+
+        // Simula retorno do Mercado Pago
+        pagamentoService.mockStatus(id, status);
+
+        return ResponseEntity.ok(Map.of(
+                "mensagem", "Mock enviado com sucesso",
+                "paymentId", id,
+                "status", status
+        ));
     }
 }

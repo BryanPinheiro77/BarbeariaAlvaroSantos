@@ -16,10 +16,10 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, Long> 
 
     List<Agendamento> findByStatus(StatusAgendamento status);
 
-    boolean existsByDataAndHorarioInicioLessThanEqualAndHorarioFimGreaterThanEqual(
+    boolean existsByDataAndHorarioInicioLessThanAndHorarioFimGreaterThan(
             LocalDate data,
-            LocalTime fim,
-            LocalTime inicio
+            LocalTime fimNovo,
+            LocalTime inicioNovo
     );
 }
 
