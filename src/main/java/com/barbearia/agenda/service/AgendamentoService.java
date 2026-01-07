@@ -30,10 +30,14 @@ public class AgendamentoService {
         this.servicoRepo = servicoRepo;
     }
 
-    public Agendamento criar(AgendamentoCreateRequest req) {
+    public Agendamento criar(AgendamentoCreateRequest req, Long clienteId) {
 
-        Cliente cliente = clienteRepo.findById(req.clienteId())
-                .orElseThrow(() -> new RuntimeException("Cliente inválido"));
+        if (clienteId == null) {
+            throw new RuntimeException("Cliente autenticado inválido");
+        }
+
+        Cliente cliente = clienteRepo.findById(clienteId)
+                .orElseThrow(() -> new RuntimeException("Cliente não encontrado"));
 
         Servico servico = servicoRepo.findById(req.servicoId())
                 .orElseThrow(() -> new RuntimeException("Serviço inválido"));
@@ -61,7 +65,6 @@ public class AgendamentoService {
         a.setFormaPagamentoModo(req.formaPagamentoModo());
         a.setLembreteMinutos(req.lembreteMinutos());
 
-        // 🔹 Estado inicial padrão
         a.setStatus(StatusAgendamento.AGENDADO);
         a.setPago(false);
         a.setEnviadoConfirmacao(false);

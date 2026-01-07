@@ -12,6 +12,8 @@ import com.barbearia.agenda.repository.HorarioBarbeiroRepository;
 import com.barbearia.agenda.service.AgendamentoService;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -48,8 +50,15 @@ public class AgendamentoController {
     // 1️⃣ CRIAR AGENDAMENTO
     // ====================================================================
     @PostMapping
-    public ResponseEntity<?> criar(@RequestBody AgendamentoCreateRequest req) {
-        Agendamento a = agendamentoService.criar(req);
+    public ResponseEntity<?> criar(
+            @RequestBody AgendamentoCreateRequest req,
+            @AuthenticationPrincipal Cliente cliente
+    ) {
+        if (cliente == null) {
+            return ResponseEntity.status(401).body("Usuário não autenticado");
+        }
+
+        Agendamento a = agendamentoService.criar(req, cliente.getId());
         return ResponseEntity.ok(toResponse(a));
     }
 
@@ -153,17 +162,24 @@ public class AgendamentoController {
     // ====================================================================
     // 7️⃣ LISTAR POR CLIENTE
     // ====================================================================
-    @GetMapping("/cliente/{clienteId}")
-    public ResponseEntity<List<AgendamentoResponse>> listarPorCliente(@PathVariable Long clienteId) {
+    @GetMapping("/meus")
+    public ResponseEntity<List<AgendamentoResponse>> listarMeus(
+            @AuthenticationPrincipal Cliente cliente
+    ) {
+        if (cliente == null) {
+            return ResponseEntity.status(401).build();
+        }
 
-        List<AgendamentoResponse> lista = agendamentoRepo.findAll()
+        List<AgendamentoResponse> lista = agendamentoRepo
+                .findByClienteId(cliente.getId())
                 .stream()
-                .filter(a -> a.getCliente().getId().equals(clienteId))
                 .map(this::toResponse)
                 .toList();
 
         return ResponseEntity.ok(lista);
     }
+
+
 
     // ====================================================================
     // 8️⃣ CANCELAR

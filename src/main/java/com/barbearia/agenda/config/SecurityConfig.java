@@ -8,6 +8,11 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 @Configuration
 public class SecurityConfig {
@@ -15,12 +20,31 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthFilter jwtFilter) throws Exception {
 
-        http.csrf(csrf -> csrf.disable())
+        http
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/auth/login", "/clientes/registrar", "/pagamentos/webhook", "/pagamentos/webhook/**",
-                                "/agendamentos",
-                                "/agendamentos/**",
-                                "/pagamentos/criar").permitAll()
+                        // públicas
+                        .requestMatchers(
+                                "/auth/login",
+                                "/clientes/registrar",
+                                "/admin/registrar",
+                                "/servicos/ativos",
+                                "/pagamentos/webhook",
+                                "/pagamentos/webhook/**",
+                                "/pagamentos/criar",
+
+                                // ✅ horários disponíveis NÃO pode exigir token
+                                "/agendamentos/horarios-disponiveis"
+                        ).permitAll()
+
+                        // protegidas do cliente
+                        .requestMatchers("/agendamentos/meus").authenticated()
+                        .requestMatchers("/agendamentos").authenticated()
+
+                        // admin (por enquanto só autenticado)
+                        .requestMatchers("/admin/**").authenticated()
+
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
@@ -31,5 +55,19 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(List.of("http://localhost:5173"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("*"));
+        config.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+
+        return source;
     }
 }

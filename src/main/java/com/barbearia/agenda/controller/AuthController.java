@@ -11,6 +11,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Optional;
+
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
@@ -46,8 +48,10 @@ public class AuthController {
         }
 
         // Tentativa como cliente
-        Cliente cliente = clienteRepository.findByEmail(req.email());
-        if(cliente != null) {
+        Optional<Cliente> clienteOpt = clienteRepository.findByEmail(req.email());
+
+        if (clienteOpt.isPresent()) {
+            Cliente cliente = clienteOpt.get();
 
             if (!passwordEncoder.matches(req.senha(), cliente.getSenhaHash())) {
                 return ResponseEntity.status(401).body("Senha incorreta");

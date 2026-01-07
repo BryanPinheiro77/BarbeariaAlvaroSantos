@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
 
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
@@ -22,19 +23,30 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final AdminRepository adminRepo;
     private final ClienteRepository clienteRepo;
 
-    public JwtAuthFilter(JwtService jwtService,
-                         AdminRepository adminRepo,
-                         ClienteRepository clienteRepo) {
+    public JwtAuthFilter(
+            JwtService jwtService,
+            AdminRepository adminRepo,
+            ClienteRepository clienteRepo
+    ) {
         this.jwtService = jwtService;
         this.adminRepo = adminRepo;
         this.clienteRepo = clienteRepo;
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain)
-            throws ServletException, IOException {
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getServletPath();
+        return path.startsWith("/auth/")
+                || path.startsWith("/servicos/ativos")
+                || path.startsWith("/clientes/registrar");
+    }
+
+    @Override
+    protected void doFilterInternal(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            FilterChain filterChain
+    ) throws ServletException, IOException {
 
         String header = request.getHeader("Authorization");
 
@@ -43,37 +55,41 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             return;
         }
 
-        String token = header.replace("Bearer ", "");
+        String token = header.substring(7);
 
-        String email = jwtService.extrairEmail(token);
+        try {
+            String email = jwtService.extrairEmail(token);
 
-        if (email == null) {
-            filterChain.doFilter(request, response);
-            return;
-        }
+            // ================= ADMIN =================
+            Admin admin = adminRepo.findByEmail(email);
+            if (admin != null) {
+                var auth = new UsernamePasswordAuthenticationToken(
+                        admin, null, List.of()
+                );
+                SecurityContextHolder.getContext().setAuthentication(auth);
+                filterChain.doFilter(request, response);
+                return;
+            }
 
-        // Verifica ADMIN
-        Admin admin = adminRepo.findByEmail(email);
-        if (admin != null) {
-            var auth = new UsernamePasswordAuthenticationToken(
-                    admin, null, null
-            );
-            SecurityContextHolder.getContext().setAuthentication(auth);
-            filterChain.doFilter(request, response);
-            return;
-        }
+            // ================= CLIENTE =================
+            Cliente cliente = clienteRepo.findByEmail(email).orElse(null);
+            if (cliente != null) {
+                var auth = new UsernamePasswordAuthenticationToken(
+                        cliente, null, List.of()
+                );
+                SecurityContextHolder.getContext().setAuthentication(auth);
+                filterChain.doFilter(request, response);
+                return;
+            }
 
-        // Verifica CLIENTE
-        Cliente cliente = clienteRepo.findByEmail(email);
-        if (cliente != null) {
-            var auth = new UsernamePasswordAuthenticationToken(
-                    cliente, null, null
-            );
-            SecurityContextHolder.getContext().setAuthentication(auth);
-            filterChain.doFilter(request, response);
-            return;
+            // token válido mas usuário não encontrado
+            SecurityContextHolder.clearContext();
+
+        } catch (Exception e) {
+            SecurityContextHolder.clearContext();
         }
 
         filterChain.doFilter(request, response);
     }
 }
+

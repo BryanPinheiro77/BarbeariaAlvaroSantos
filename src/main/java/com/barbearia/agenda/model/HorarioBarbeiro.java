@@ -1,15 +1,13 @@
 package com.barbearia.agenda.model;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
+import jakarta.persistence.*;
 import lombok.Data;
 
 import java.time.LocalTime;
 
 @Entity
 @Data
+@Table(name = "horarios_barbeiro", schema = "public")
 public class HorarioBarbeiro {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
