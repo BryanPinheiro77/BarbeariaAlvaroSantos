@@ -3,7 +3,9 @@ package com.barbearia.agenda.config;
 import com.barbearia.agenda.security.JwtAuthFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -19,11 +21,13 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthFilter jwtFilter) throws Exception {
-
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+
                         // públicas
                         .requestMatchers(
                                 "/auth/login",
@@ -33,17 +37,14 @@ public class SecurityConfig {
                                 "/pagamentos/webhook",
                                 "/pagamentos/webhook/**",
                                 "/pagamentos/criar",
-
-                                // ✅ horários disponíveis NÃO pode exigir token
                                 "/agendamentos/horarios-disponiveis"
                         ).permitAll()
 
-                        // protegidas do cliente
-                        .requestMatchers("/agendamentos/meus").authenticated()
-                        .requestMatchers("/agendamentos").authenticated()
+                        // admin
+                        .requestMatchers("/admin/**").hasRole("ADMIN")
 
-                        // admin (por enquanto só autenticado)
-                        .requestMatchers("/admin/**").authenticated()
+                        // cliente
+                        .requestMatchers("/agendamentos/**").hasRole("CLIENTE")
 
                         .anyRequest().authenticated()
                 )
@@ -61,13 +62,12 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOrigins(List.of("http://localhost:5173"));
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
-
         return source;
     }
 }

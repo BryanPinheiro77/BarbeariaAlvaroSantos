@@ -2,10 +2,10 @@ package com.barbearia.agenda.dto;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
 
 public record AgendamentoCreateRequest(
-        Long clienteId,
-        Long servicoId,
+        List<Long> servicosIds,
         LocalDate data,
         LocalTime horarioInicio,
         String formaPagamentoTipo,

@@ -9,6 +9,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -23,11 +24,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final AdminRepository adminRepo;
     private final ClienteRepository clienteRepo;
 
-    public JwtAuthFilter(
-            JwtService jwtService,
-            AdminRepository adminRepo,
-            ClienteRepository clienteRepo
-    ) {
+    public JwtAuthFilter(JwtService jwtService, AdminRepository adminRepo, ClienteRepository clienteRepo) {
         this.jwtService = jwtService;
         this.adminRepo = adminRepo;
         this.clienteRepo = clienteRepo;
@@ -36,9 +33,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getServletPath();
+
         return path.startsWith("/auth/")
                 || path.startsWith("/servicos/ativos")
-                || path.startsWith("/clientes/registrar");
+                || path.startsWith("/clientes/registrar")
+                || path.startsWith("/admin/registrar")
+                || path.startsWith("/pagamentos/webhook")
+                || path.startsWith("/pagamentos/criar")
+                || path.startsWith("/agendamentos/horarios-disponiveis");
     }
 
     @Override
@@ -59,31 +61,39 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         try {
             String email = jwtService.extrairEmail(token);
+            String tipo = jwtService.extrairTipo(token); // CLIENTE / ADMIN
 
-            // ================= ADMIN =================
-            Admin admin = adminRepo.findByEmail(email);
-            if (admin != null) {
-                var auth = new UsernamePasswordAuthenticationToken(
-                        admin, null, List.of()
-                );
-                SecurityContextHolder.getContext().setAuthentication(auth);
+            if (email == null || email.isBlank()) {
                 filterChain.doFilter(request, response);
                 return;
             }
 
-            // ================= CLIENTE =================
-            Cliente cliente = clienteRepo.findByEmail(email).orElse(null);
-            if (cliente != null) {
-                var auth = new UsernamePasswordAuthenticationToken(
-                        cliente, null, List.of()
-                );
-                SecurityContextHolder.getContext().setAuthentication(auth);
-                filterChain.doFilter(request, response);
-                return;
-            }
+            if ("ADMIN".equalsIgnoreCase(tipo)) {
+                Admin admin = adminRepo.findByEmail(email);
+                if (admin != null) {
+                    var auth = new UsernamePasswordAuthenticationToken(
+                            email, // <-- PRINCIPAL AGORA É O EMAIL
+                            null,
+                            List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))
+                    );
+                    // opcional: guardar o objeto completo aqui
+                    auth.setDetails(admin);
 
-            // token válido mas usuário não encontrado
-            SecurityContextHolder.clearContext();
+                    SecurityContextHolder.getContext().setAuthentication(auth);
+                }
+            } else {
+                Cliente cliente = clienteRepo.findByEmail(email).orElse(null);
+                if (cliente != null) {
+                    var auth = new UsernamePasswordAuthenticationToken(
+                            email, // <-- PRINCIPAL AGORA É O EMAIL
+                            null,
+                            List.of(new SimpleGrantedAuthority("ROLE_CLIENTE"))
+                    );
+                    auth.setDetails(cliente);
+
+                    SecurityContextHolder.getContext().setAuthentication(auth);
+                }
+            }
 
         } catch (Exception e) {
             SecurityContextHolder.clearContext();
@@ -91,5 +101,5 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         filterChain.doFilter(request, response);
     }
-}
 
+}

@@ -52,15 +52,18 @@ public class AgendamentoController {
     @PostMapping
     public ResponseEntity<?> criar(
             @RequestBody AgendamentoCreateRequest req,
-            @AuthenticationPrincipal Cliente cliente
+            Authentication auth
     ) {
-        if (cliente == null) {
+        if (auth == null) {
             return ResponseEntity.status(401).body("Usuário não autenticado");
         }
 
-        Agendamento a = agendamentoService.criar(req, cliente.getId());
+        String email = auth.getName();
+        Agendamento a = agendamentoService.criar(req, email);
         return ResponseEntity.ok(toResponse(a));
     }
+
+
 
 
     // ====================================================================
@@ -163,23 +166,20 @@ public class AgendamentoController {
     // 7️⃣ LISTAR POR CLIENTE
     // ====================================================================
     @GetMapping("/meus")
-    public ResponseEntity<List<AgendamentoResponse>> listarMeus(
-            @AuthenticationPrincipal Cliente cliente
-    ) {
-        if (cliente == null) {
-            return ResponseEntity.status(401).build();
+    public ResponseEntity<?> listarMeus(Authentication auth) {
+        if (auth == null) {
+            return ResponseEntity.status(401).body("Usuário não autenticado");
         }
 
-        List<AgendamentoResponse> lista = agendamentoRepo
-                .findByClienteId(cliente.getId())
+        String email = auth.getName();
+
+        List<AgendamentoResponse> lista = agendamentoService.listarMeus(email)
                 .stream()
                 .map(this::toResponse)
                 .toList();
 
         return ResponseEntity.ok(lista);
     }
-
-
 
     // ====================================================================
     // 8️⃣ CANCELAR
@@ -234,19 +234,35 @@ public class AgendamentoController {
     }
 
     private AgendamentoResponse toResponse(Agendamento a) {
+
+        var servicosDto = a.getServicos().stream()
+                .map(link -> new AgendamentoServico(
+                        link.getServico().getId(),
+                        link.getServico().getNome(),
+                        link.getServico().getDuracaoMinutos(),
+                        link.getServico().getPreco()
+                ))
+                .toList();
+
         return new AgendamentoResponse(
                 a.getId(),
                 a.getCliente().getId(),
                 a.getCliente().getNome(),
-                a.getServico().getId(),
-                a.getServico().getNome(),
+
+                servicosDto,
+
                 a.getData(),
                 a.getHorarioInicio(),
                 a.getHorarioFim(),
+
                 a.getFormaPagamentoTipo(),
                 a.getFormaPagamentoModo(),
                 a.getLembreteMinutos(),
-                a.getStatus()
+                a.getStatus(),
+
+                a.isPago()
         );
     }
+
+
 }

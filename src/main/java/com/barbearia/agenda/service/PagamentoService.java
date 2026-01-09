@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -42,9 +43,13 @@ public class PagamentoService {
         Agendamento agendamento = agendamentoRepo.findById(req.agendamentoId())
                 .orElseThrow(() -> new RuntimeException("Agendamento não encontrado"));
 
+        if (agendamento.getServicos() == null || agendamento.getServicos().isEmpty()) {
+            throw new RuntimeException("Agendamento não possui serviços para calcular o total.");
+        }
+
         Pagamento pagamento = new Pagamento();
         pagamento.setAgendamento(agendamento);
-        pagamento.setValor(agendamento.getServico().getPreco());
+        pagamento.setValor(calcularTotalAgendamento(agendamento));
         pagamento.setMetodo(req.tipoPagamento());
         pagamento.setStatus(StatusPagamento.PENDENTE);
         pagamento.setCriadoEm(LocalDateTime.now());
@@ -346,6 +351,12 @@ public class PagamentoService {
     public void mockStatus(Long id, String status) {
         Pagamento pagamento = buscarPorId(id);
         atualizarStatusPagamento(pagamento, status);
+    }
+
+    private BigDecimal calcularTotalAgendamento(Agendamento ag) {
+        return ag.getServicos().stream()
+                .map(link -> link.getServico().getPreco())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
 }

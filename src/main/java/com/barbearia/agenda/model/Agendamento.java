@@ -20,9 +20,8 @@ public class Agendamento {
     @JoinColumn(name = "cliente_id")
     private Cliente cliente;
 
-    @ManyToOne
-    @JoinColumn(name = "servico_id")
-    private Servico servico;
+    @OneToMany(mappedBy = "agendamento", cascade = CascadeType.ALL, orphanRemoval = true)
+    private java.util.List<AgendamentoServico> servicos = new java.util.ArrayList<>();
 
     // DATA E HORÁRIOS
     private LocalDate data;
