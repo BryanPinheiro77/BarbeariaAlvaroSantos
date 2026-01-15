@@ -110,4 +110,25 @@ public class AgendamentoService {
 
         return agendamentoRepo.findByClienteId(cliente.getId());
     }
+
+    @Transactional
+    public Agendamento cancelarCliente(Long agendamentoId, String email) {
+        Cliente cliente = clienteRepo.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Cliente não encontrado"));
+
+        Agendamento ag = agendamentoRepo.findById(agendamentoId)
+                .orElseThrow(() -> new RuntimeException("Agendamento não encontrado"));
+
+        if (!ag.getCliente().getId().equals(cliente.getId())) {
+            throw new RuntimeException("Você não pode cancelar este agendamento");
+        }
+
+        if (ag.isPago()) {
+            throw new RuntimeException("Não é possível cancelar um agendamento pago");
+        }
+
+        ag.setStatus(StatusAgendamento.CANCELADO);
+        return agendamentoRepo.save(ag);
+    }
+
 }

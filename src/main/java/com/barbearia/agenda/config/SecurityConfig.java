@@ -28,24 +28,50 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                        // públicas
+                        // =========================
+                        // PÚBLICAS
+                        // =========================
                         .requestMatchers(
                                 "/auth/login",
-                                "/clientes/registrar",
-                                "/pagamentos/webhook",
-                                "/pagamentos/webhook/**",
-                                "/pagamentos/criar",
-                                "/agendamentos/horarios-disponiveis"
+                                "/clientes/registrar"
                         ).permitAll()
 
-                        // serviços (cliente pode ver só o GET /servicos/ativos)
+                        // serviços para cliente (somente ativos)
                         .requestMatchers(HttpMethod.GET, "/servicos/ativos").permitAll()
 
-                        // admin
+                        // webhook do Mercado Pago tem que ser público
+                        .requestMatchers(
+                                "/pagamentos/webhook",
+                                "/pagamentos/webhook/**"
+                        ).permitAll()
+
+                        // horários disponíveis (se você quer permitir sem login)
+                        // se preferir exigir login do cliente, troque pra hasRole("CLIENTE")
+                        .requestMatchers("/agendamentos/horarios-disponiveis").permitAll()
+
+                        // =========================
+                        // ADMIN
+                        // =========================
                         .requestMatchers("/admin/**").hasRole("ADMIN")
+
+                        // CRUD de serviços só admin
                         .requestMatchers("/servicos/**").hasRole("ADMIN")
 
-                        // cliente
+                        /// PAGAMENTOS (CLIENTE)
+                        .requestMatchers(HttpMethod.POST, "/pagamentos/criar").hasRole("CLIENTE")
+                        .requestMatchers(HttpMethod.GET, "/pagamentos/*").hasRole("CLIENTE")
+                        .requestMatchers(HttpMethod.GET, "/pagamentos/agendamentos/**").hasRole("CLIENTE")
+
+                        // PAGAMENTOS (ADMIN)
+                        .requestMatchers(HttpMethod.GET, "/pagamentos").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/pagamentos/*/confirmar-manual").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/pagamentos/*/cancelar").hasRole("ADMIN")
+                        .requestMatchers("/pagamentos/mock/**").hasRole("ADMIN")
+
+
+                        // =========================
+                        // CLIENTE (AGENDAMENTOS)
+                        // =========================
                         .requestMatchers("/agendamentos/**").hasRole("CLIENTE")
 
                         .anyRequest().authenticated()

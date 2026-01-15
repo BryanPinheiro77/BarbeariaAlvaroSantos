@@ -77,7 +77,6 @@ public class PagamentoService {
                 "unit_price", pagamento.getValor().doubleValue()
         );
 
-        // NÃO COLOCA external_reference
         Map<String, Object> body = Map.of(
                 "items", List.of(item),
                 "notification_url", "https://botchiest-unpenuriously-zenobia.ngrok-free.dev/pagamentos/webhook"
@@ -91,14 +90,25 @@ public class PagamentoService {
         ResponseEntity<Map> resp =
                 client.postForEntity(url, new HttpEntity<>(body, headers), Map.class);
 
-        String preferenceId = resp.getBody().get("id").toString();
-        String initPoint = resp.getBody().get("init_point").toString();
+        Map<String, Object> responseBody = resp.getBody();
+        if (responseBody == null) {
+            throw new RuntimeException("Mercado Pago retornou body vazio ao criar preferência.");
+        }
+
+        String preferenceId = responseBody.get("id").toString();
+
+        // Se for token de TESTE, prefira sandbox_init_point (quando existir)
+        String initPoint;
+        boolean isTestToken = mpToken != null && mpToken.startsWith("TEST-");
+
+        if (isTestToken && responseBody.get("sandbox_init_point") != null) {
+            initPoint = responseBody.get("sandbox_init_point").toString();
+        } else {
+            initPoint = responseBody.get("init_point").toString();
+        }
 
         pagamento.setGatewayId(preferenceId);
         pagamentoRepo.save(pagamento);
-
-        System.out.println("✅ Checkout criado | PagamentoID=" + pagamento.getId()
-                + " | PreferenceID=" + preferenceId);
 
         return new PagamentoCreateResponse(
                 pagamento.getId(),
@@ -109,6 +119,7 @@ public class PagamentoService {
                 initPoint
         );
     }
+
 
     // =============================================================
     // 3) PIX DIRECT (REAL)

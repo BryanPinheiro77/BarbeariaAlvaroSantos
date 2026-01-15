@@ -175,15 +175,11 @@ public class AgendamentoController {
     // 8️⃣ CANCELAR
     // ====================================================================
     @PatchMapping("/{id}/cancelar")
-    public ResponseEntity<?> cancelar(@PathVariable Long id) {
-        return agendamentoRepo.findById(id)
-                .map(a -> {
-                    a.setStatus(StatusAgendamento.CANCELADO);
-                    agendamentoRepo.save(a);
-                    return ResponseEntity.noContent().build();
-                })
-                .orElse(ResponseEntity.notFound().build());
+    public ResponseEntity<?> cancelar(@PathVariable Long id, Authentication auth) {
+        String email = auth.getName();
+        return ResponseEntity.ok(agendamentoService.cancelarCliente(id, email));
     }
+
 
     // ====================================================================
     // 9️⃣ CONCLUIR

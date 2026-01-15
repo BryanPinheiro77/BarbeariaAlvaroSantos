@@ -34,14 +34,17 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getServletPath();
 
+        // Sempre ignore preflight
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) return true;
+
         return path.startsWith("/auth/")
                 || path.startsWith("/servicos/ativos")
                 || path.startsWith("/clientes/registrar")
                 || path.startsWith("/admin/registrar")
                 || path.startsWith("/pagamentos/webhook")
-                || path.startsWith("/pagamentos/criar")
                 || path.startsWith("/agendamentos/horarios-disponiveis");
     }
+
 
     @Override
     protected void doFilterInternal(
