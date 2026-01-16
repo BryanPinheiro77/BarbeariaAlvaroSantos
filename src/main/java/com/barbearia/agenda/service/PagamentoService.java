@@ -26,6 +26,10 @@ public class PagamentoService {
     @Value("${mp.access-token}")
     private String mpToken;
 
+    // DICA: se quiser, extraia isso para application.properties no futuro
+    private static final String NOTIFICATION_URL =
+            "https://botchiest-unpenuriously-zenobia.ngrok-free.dev/pagamentos/webhook";
+
     private final AgendamentoRepository agendamentoRepo;
     private final PagamentoRepository pagamentoRepo;
 
@@ -50,7 +54,7 @@ public class PagamentoService {
         Pagamento pagamento = new Pagamento();
         pagamento.setAgendamento(agendamento);
         pagamento.setValor(calcularTotalAgendamento(agendamento));
-        pagamento.setMetodo(req.tipoPagamento());
+        pagamento.setMetodo(req.tipoPagamento()); // "PIX" ou "CARTAO"
         pagamento.setStatus(StatusPagamento.PENDENTE);
         pagamento.setCriadoEm(LocalDateTime.now());
         pagamento = pagamentoRepo.save(pagamento);
@@ -64,7 +68,7 @@ public class PagamentoService {
     }
 
     // =============================================================
-    // 2) CHECKOUT PRO — preferência REAL sem external_reference
+    // 2) CHECKOUT PRO — preferência com external_reference (ID interno)
     // =============================================================
     private PagamentoCreateResponse criarCheckoutPro(Pagamento pagamento) {
 
@@ -77,9 +81,12 @@ public class PagamentoService {
                 "unit_price", pagamento.getValor().doubleValue()
         );
 
+        // IMPORTANTE:
+        // external_reference = ID do seu Pagamento, para mapear webhook -> pagamento interno SEM depender de preference_id
         Map<String, Object> body = Map.of(
                 "items", List.of(item),
-                "notification_url", "https://botchiest-unpenuriously-zenobia.ngrok-free.dev/pagamentos/webhook"
+                "external_reference", pagamento.getId().toString(),
+                "notification_url", NOTIFICATION_URL
         );
 
         HttpHeaders headers = new HttpHeaders();
@@ -87,6 +94,7 @@ public class PagamentoService {
         headers.setBearerAuth(mpToken);
 
         RestTemplate client = new RestTemplate();
+
         ResponseEntity<Map> resp =
                 client.postForEntity(url, new HttpEntity<>(body, headers), Map.class);
 
@@ -97,18 +105,21 @@ public class PagamentoService {
 
         String preferenceId = responseBody.get("id").toString();
 
-        // Se for token de TESTE, prefira sandbox_init_point (quando existir)
-        String initPoint;
-        boolean isTestToken = mpToken != null && mpToken.startsWith("TEST-");
-
-        if (isTestToken && responseBody.get("sandbox_init_point") != null) {
+        // Atenção: no MP Brasil, token de teste pode vir como APP_USR.
+        // Então o melhor é escolher init_point baseado na presença de sandbox_init_point.
+        String initPoint = responseBody.get("init_point").toString();
+        if (responseBody.get("sandbox_init_point") != null) {
+            // se existir, melhor para testes
             initPoint = responseBody.get("sandbox_init_point").toString();
-        } else {
-            initPoint = responseBody.get("init_point").toString();
         }
 
+        // Salva gatewayId como preferenceId (continua útil como fallback)
         pagamento.setGatewayId(preferenceId);
         pagamentoRepo.save(pagamento);
+
+        System.out.println("✅ Checkout Pro criado | pagamentoId=" + pagamento.getId()
+                + " | preferenceId=" + preferenceId
+                + " | initPoint=" + initPoint);
 
         return new PagamentoCreateResponse(
                 pagamento.getId(),
@@ -120,9 +131,8 @@ public class PagamentoService {
         );
     }
 
-
     // =============================================================
-    // 3) PIX DIRECT (REAL)
+    // 3) PIX DIRECT (teste/real) — cria payment e salva gatewayId = paymentId
     // =============================================================
     private PagamentoCreateResponse criarPixDirect(Pagamento pagamento) {
 
@@ -132,6 +142,9 @@ public class PagamentoService {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(mpToken);
 
+        // IMPORTANTE:
+        // Para PIX direct em ambiente de teste, o email ideal é de um TEST USER criado no painel.
+        // Se usar email fake, pode dar 401/erro.
         Map<String, Object> payer = Map.of(
                 "email", "test_user_123@testuser.com"
         );
@@ -140,28 +153,30 @@ public class PagamentoService {
                 "transaction_amount", pagamento.getValor().doubleValue(),
                 "description", "Pagamento #" + pagamento.getId(),
                 "payment_method_id", "pix",
-                "payer", payer
+                "payer", payer,
+                // também ajuda mapear retorno do MP pro seu pagamento interno
+                "external_reference", pagamento.getId().toString()
         );
 
         RestTemplate client = new RestTemplate();
+
         try {
             ResponseEntity<Map> resp =
                     client.postForEntity(url, new HttpEntity<>(body, headers), Map.class);
 
-            System.out.println("🔁 MP /v1/payments status=" + resp.getStatusCode().value() + " body=" + resp.getBody());
-
             Map<String, Object> payment = resp.getBody();
+            System.out.println("🔁 MP /v1/payments status=" + resp.getStatusCode().value() + " body=" + payment);
+
             if (payment == null) {
                 throw new RuntimeException("Erro ao criar pagamento PIX: resposta vazia");
             }
 
-            // id do payment
             Long paymentId = Long.valueOf(payment.get("id").toString());
 
+            // Para PIX direct, o gatewayId é o paymentId
             pagamento.setGatewayId(paymentId.toString());
             pagamentoRepo.save(pagamento);
 
-            // Segurança: cheque se point_of_interaction e transaction_data existem
             Object poiObj = payment.get("point_of_interaction");
             if (!(poiObj instanceof Map)) {
                 throw new RuntimeException("Resposta MP não contém point_of_interaction: " + payment);
@@ -174,10 +189,10 @@ public class PagamentoService {
             }
             Map<String, Object> txData = (Map<String, Object>) txObj;
 
-            String qrBase64 = txData.get("qr_code_base64").toString();
-            String copiaCola = txData.get("qr_code").toString();
+            String qrBase64 = String.valueOf(txData.get("qr_code_base64"));
+            String copiaCola = String.valueOf(txData.get("qr_code"));
 
-            System.out.println("⚡ PIX criado | paymentId = " + paymentId);
+            System.out.println("⚡ PIX criado | pagamentoIdInterno=" + pagamento.getId() + " | paymentIdMP=" + paymentId);
 
             return new PagamentoCreateResponse(
                     pagamento.getId(),
@@ -199,7 +214,7 @@ public class PagamentoService {
     }
 
     // =============================================================
-    // 4) PROCESSAR MERCHANT_ORDER
+    // 4) PROCESSAR MERCHANT_ORDER (quando o webhook vier como merchant_order)
     // =============================================================
     public void processarWebhook(Long merchantOrderId) {
 
@@ -215,18 +230,21 @@ public class PagamentoService {
         Map<String, Object> order = resp.getBody();
         if (order == null) return;
 
+        System.out.println("🔎 merchant_order=" + merchantOrderId + " body=" + order);
+
         List<Map<String, Object>> payments = (List<Map<String, Object>>) order.get("payments");
         if (payments == null || payments.isEmpty()) {
             System.out.println("⚠ merchant_order SEM payments ainda");
             return;
         }
 
+        // pega o primeiro payment associado
         Long paymentId = Long.valueOf(payments.get(0).get("id").toString());
         processarPagamentoDireto(paymentId);
     }
 
     // =============================================================
-    // 5) PROCESSAR PAYMENT (Pix Direct + Checkout Pro)
+    // 5) PROCESSAR PAYMENT (Checkout Pro + Pix Direct)
     // =============================================================
     public void processarPagamentoDireto(Long paymentId) {
 
@@ -243,28 +261,52 @@ public class PagamentoService {
             Map<String, Object> pay = resp.getBody();
             if (pay == null) return;
 
-            // PIX Direct (não possui preference_id)
-            if (pay.get("preference_id") == null) {
+            String status = String.valueOf(pay.get("status"));
+            Object externalRefObj = pay.get("external_reference");
+            Object preferenceObj = pay.get("preference_id");
 
-                Pagamento pagamento = pagamentoRepo.findByGatewayId(paymentId.toString());
-                if (pagamento == null) return;
+            System.out.println("💳 MP paymentId=" + paymentId
+                    + " | status=" + status
+                    + " | external_reference=" + externalRefObj
+                    + " | preference_id=" + preferenceObj);
 
-                String status = pay.get("status").toString();
-                atualizarStatusPagamento(pagamento, status);
+            // (A) Melhor caminho: achar pelo external_reference (ID do seu Pagamento)
+            if (externalRefObj != null) {
+                Long pagamentoIdInterno = Long.valueOf(externalRefObj.toString());
+                Pagamento pagamento = pagamentoRepo.findById(pagamentoIdInterno).orElse(null);
+
+                if (pagamento != null) {
+                    atualizarStatusPagamento(pagamento, status);
+                    return;
+                }
+            }
+
+            // (B) Fallback: Checkout Pro usando preference_id (quando vier)
+            if (preferenceObj != null) {
+                String preferenceId = preferenceObj.toString();
+                Pagamento pagamento = pagamentoRepo.findByGatewayId(preferenceId);
+
+                if (pagamento != null) {
+                    atualizarStatusPagamento(pagamento, status);
+                } else {
+                    System.out.println("⚠ Não achei pagamento por preference_id=" + preferenceId);
+                }
                 return;
             }
 
-            // Checkout Pro
-            String preferenceId = pay.get("preference_id").toString();
-            Pagamento pagamento = pagamentoRepo.findByGatewayId(preferenceId);
-
-            if (pagamento == null) return;
-
-            String status = pay.get("status").toString();
-            atualizarStatusPagamento(pagamento, status);
+            // (C) Fallback: Pix Direct (gatewayId = paymentId)
+            Pagamento pagamento = pagamentoRepo.findByGatewayId(paymentId.toString());
+            if (pagamento != null) {
+                atualizarStatusPagamento(pagamento, status);
+            } else {
+                System.out.println("⚠ Não achei pagamento por gatewayId(paymentId)=" + paymentId);
+            }
 
         } catch (HttpClientErrorException.NotFound e) {
-            System.out.println("⚠ Payment " + paymentId + " não encontrado (simulador).");
+            System.out.println("⚠ Payment " + paymentId + " não encontrado no MP.");
+        } catch (HttpClientErrorException e) {
+            System.out.println("❌ Erro ao consultar payment " + paymentId + ": " + e.getStatusCode()
+                    + " body=" + e.getResponseBodyAsString());
         }
     }
 
@@ -282,28 +324,31 @@ public class PagamentoService {
         };
 
         pagamento.setStatus(novoStatus);
-        pagamento.setCriadoEm(LocalDateTime.now());
+        pagamento.setCriadoEm(LocalDateTime.now()); // se quiser, crie recebidoEm separado
         pagamentoRepo.save(pagamento);
+
+        System.out.println("✅ Pagamento atualizado | id=" + pagamento.getId()
+                + " | status=" + pagamento.getStatus());
 
         if (novoStatus == StatusPagamento.PAGO) {
             Agendamento ag = pagamento.getAgendamento();
             ag.setPago(true);
             agendamentoRepo.save(ag);
-            System.out.println("✅ AGENDAMENTO MARCADO COMO PAGO!");
+            System.out.println("✅ AGENDAMENTO MARCADO COMO PAGO! agendamentoId=" + ag.getId());
         }
     }
 
     // =============================================================
-// 7) BUSCAR POR ID
-// =============================================================
+    // 7) BUSCAR POR ID
+    // =============================================================
     public Pagamento buscarPorId(Long id) {
         return pagamentoRepo.findById(id)
                 .orElseThrow(() -> new RuntimeException("Pagamento não encontrado"));
     }
 
     // =============================================================
-// 8) LISTAR POR STATUS
-// =============================================================
+    // 8) LISTAR POR STATUS
+    // =============================================================
     public List<Pagamento> listarPorStatus(String status) {
 
         if (status == null || status.isBlank()) {
@@ -315,15 +360,15 @@ public class PagamentoService {
     }
 
     // =============================================================
-// 9) LISTAR POR AGENDAMENTO
-// =============================================================
+    // 9) LISTAR POR AGENDAMENTO
+    // =============================================================
     public List<Pagamento> listarPorAgendamento(Long agendamentoId) {
         return pagamentoRepo.findByAgendamentoId(agendamentoId);
     }
 
     // =============================================================
-// 10) CANCELAR MANUALMENTE
-// =============================================================
+    // 10) CANCELAR MANUALMENTE
+    // =============================================================
     public Pagamento cancelar(Long id) {
         Pagamento pagamento = buscarPorId(id);
 
@@ -338,18 +383,17 @@ public class PagamentoService {
     }
 
     // =============================================================
-// 11) CONFIRMAR MANUALMENTE
-// =============================================================
+    // 11) CONFIRMAR MANUALMENTE
+    // =============================================================
     public Pagamento confirmarManual(Long id) {
         Pagamento pagamento = buscarPorId(id);
 
         if (pagamento.getStatus() == StatusPagamento.PAGO) {
-            return pagamento; // já está pago
+            return pagamento;
         }
 
         pagamento.setStatus(StatusPagamento.PAGO);
 
-        // marca agendamento como pago
         Agendamento ag = pagamento.getAgendamento();
         ag.setPago(true);
         agendamentoRepo.save(ag);
@@ -369,5 +413,4 @@ public class PagamentoService {
                 .map(link -> link.getServico().getPreco())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
-
 }
