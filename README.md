@@ -171,4 +171,6 @@ Desenvolvedor Back-end / Full Stack Jr
 
 ## 📄 Licença
 
-MIT
+Este projeto está licenciado sob a licença MIT.  
+Consulte o arquivo [LICENSE](LICENSE) para mais detalhes.
+
