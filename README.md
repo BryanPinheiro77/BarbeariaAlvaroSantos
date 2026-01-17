@@ -1,9 +1,9 @@
 # Barbearia Álvaro Santos 💈✂️  
-Sistema de Agendamento e Pagamentos – Back-end API
+Sistema de Agendamento e Pagamentos – Back-end (API REST)
 
-![Badge](https://img.shields.io/badge/Java-17-red)
-![Badge](https://img.shields.io/badge/Spring%20Boot-Backend-brightgreen)
-![Badge](https://img.shields.io/badge/PostgreSQL-Database-blue)
+![Badge](https://img.shields.io/badge/Java-21-red)
+![Badge](https://img.shields.io/badge/Spring%20Boot-4.x-brightgreen)
+![Badge](https://img.shields.io/badge/PostgreSQL-Supabase-blue)
 ![Badge](https://img.shields.io/badge/JWT-Security-orange)
 ![Badge](https://img.shields.io/badge/Status-Em%20Desenvolvimento-yellow)
 
@@ -11,7 +11,7 @@ Sistema de Agendamento e Pagamentos – Back-end API
 
 ## 📌 Sobre o Projeto
 
-O **Barbearia Álvaro Santos – Sistema de Agendamento** é um projeto **real**, desenvolvido para atender às necessidades de organização, agendamento e controle de pagamentos de uma barbearia.
+ **Barbearia Álvaro Santos – Sistema de Agendamento** é um projeto **real**, desenvolvido para atender às necessidades de organização, agendamento e controle de pagamentos de uma barbearia.
 
 O sistema foi pensado para resolver problemas comuns do dia a dia, como:
 
@@ -26,30 +26,43 @@ O projeto está sendo desenvolvido com foco em **uso real em produção**, aplic
 
 ## 🏗️ Arquitetura
 
-O back-end foi desenvolvido como uma **API REST desacoplada**, seguindo uma arquitetura em camadas:
+API REST em camadas:
 
-- **Controllers** – exposição dos endpoints REST  
+- **Controllers** – endpoints REST  
 - **Services** – regras de negócio e validações  
 - **Repositories** – acesso ao banco com Spring Data JPA  
-- **Models / Entities** – domínio da aplicação  
+- **Models / Entities** – domínio  
 - **DTOs** – contratos de entrada e saída  
 - **Security** – autenticação e autorização com JWT  
 
-O front-end (React) consome essa API de forma independente.
+O front-end (React/Vite) consome esta API de forma independente.
 
 ---
 
 ## 🚀 Tecnologias Utilizadas
 
-- Java 17  
-- Spring Boot  
+- Java 21  
+- Spring Boot 4  
 - Spring Web MVC  
 - Spring Data JPA (Hibernate)  
 - Spring Security  
 - JWT (JSON Web Token)  
-- PostgreSQL  
+- PostgreSQL (Supabase)  
 - Maven  
 - Lombok  
+
+---
+
+## ☁️ Deploy (Produção)
+
+- **Back-end**: Railway  
+- **Banco de dados**: Supabase Postgres  
+- **Front-end**: Vercel  
+
+### Observação (Supabase / Railway)
+
+Se o teu ambiente de deploy estiver em IPv4, a **Direct connection** do Supabase pode falhar (mensagem “Not IPv4 compatible”).  
+Em produção, recomenda-se usar **Session Pooler** do Supabase para obter estabilidade de conexão.
 
 ---
 
@@ -61,7 +74,7 @@ O front-end (React) consome essa API de forma independente.
   - `CLIENTE`
 - Sessões **stateless**
 - Senhas criptografadas com **BCrypt**
-- Credenciais e segredos **fora do repositório**
+- Credenciais e segredos **fora do repositório** (via ENV)
 
 ---
 
@@ -91,21 +104,30 @@ O front-end (React) consome essa API de forma independente.
 
 ---
 
-## 🗄️ Banco de Dados
+## 🔗 Endpoints (principais)
 
-O sistema utiliza **PostgreSQL** com tabelas relacionais para:
+> Observação: os endpoints abaixo são um resumo do núcleo do sistema.
 
-- clientes  
-- administradores  
-- serviços  
-- agendamentos  
-- pagamentos  
+**Públicos**
+- `POST /auth/login`
+- `POST /clientes/registrar`
+- `GET  /servicos/ativos`
+- `POST /pagamentos/webhook` (e variações sob `/pagamentos/webhook/**`)
+- `GET  /agendamentos/horarios-disponiveis`
 
-O schema é mantido externamente, com:
+**Cliente (ROLE_CLIENTE)**
+- `POST /pagamentos/criar`
+- `GET  /pagamentos/*`
+- `GET  /pagamentos/agendamentos/**`
+- `GET/POST/PATCH/DELETE /agendamentos/**` (conforme regras do sistema)
 
-```
-spring.jpa.hibernate.ddl-auto=none
-```
+**Admin (ROLE_ADMIN)**
+- `/admin/**`
+- `/servicos/**`
+- `GET  /pagamentos`
+- `PATCH /pagamentos/*/confirmar-manual`
+- `PATCH /pagamentos/*/cancelar`
+- `/pagamentos/mock/**` (ambiente de teste)
 
 ---
 
@@ -113,31 +135,38 @@ spring.jpa.hibernate.ddl-auto=none
 
 Nenhuma credencial sensível é versionada no repositório.
 
-O projeto utiliza separação de configuração:
+### Variáveis de ambiente (Produção / Railway)
 
-- `application.properties` → configurações seguras  
-- `application-secret.properties` → credenciais (fora do Git)  
+**Banco**
+- `SPRING_DATASOURCE_URL`
+- `SPRING_DATASOURCE_USERNAME`
+- `SPRING_DATASOURCE_PASSWORD`
+- `DB_POOL_SIZE` (opcional, ex.: `5`)
 
-### Exemplo (`application-secret.properties`)
-```properties
-spring.datasource.url=jdbc:postgresql://HOST:5432/DB
-spring.datasource.username=USUARIO
-spring.datasource.password=SENHA
+**Segurança**
+- `JWT_SECRET`
+- `JWT_EXPIRATION` (opcional, default: `28800000`)
 
-jwt.secret=SEU_SEGREDO_FORTE
-jwt.expiration=28800000
+**Mercado Pago**
+- `MP_ACCESS_TOKEN`
 
-mp.access-token=SEU_TOKEN_MERCADO_PAGO
-```
+**CORS**
+- `CORS_ALLOWED_ORIGINS`  
+  Ex.: `http://localhost:5173,https://SEU-FRONT.vercel.app`
+
+### Exemplo (Supabase Session Pooler)
+- `SPRING_DATASOURCE_URL=jdbc:postgresql://<pooler-host>:5432/postgres?sslmode=require`
+- `SPRING_DATASOURCE_USERNAME=postgres.<ref-do-projeto>`
+- `SPRING_DATASOURCE_PASSWORD=<sua-senha>`
 
 ---
 
-## ▶️ Como Executar o Back-end
+## ▶️ Como Executar Localmente
 
 ### Pré-requisitos
-- Java 17
+- Java 21
 - Maven
-- PostgreSQL
+- PostgreSQL (local) **ou** Supabase
 
 ### Execução
 ```bash
@@ -145,25 +174,31 @@ mvn spring-boot:run
 ```
 
 A API ficará disponível em:
-
 ```
 http://localhost:8080
 ```
 
 ---
 
-## 📌 Status do Projeto
+## 🗄️ Banco de Dados
 
-🚧 **Em desenvolvimento ativo**  
-Projeto real, com melhorias contínuas.
+O schema é mantido externamente, com:
+```properties
+spring.jpa.hibernate.ddl-auto=none
+```
+
+---
+
+## 🧭 Roadmap
+
+- Integração WhatsApp: confirmação e lembrete de agendamento
+- Melhorias de performance: paginação, DTOs enxutos, evitar N+1, índices no Postgres
 
 ---
 
 ## 👨‍💻 Autor
 
 **Bryan Mendes Pinheiro**  
-Desenvolvedor Back-end / Full Stack Jr  
-
 - GitHub: https://github.com/BryanPinheiro77  
 - LinkedIn: https://www.linkedin.com/in/bryan-mendes-0406b92b5  
 
@@ -173,4 +208,3 @@ Desenvolvedor Back-end / Full Stack Jr
 
 Este projeto está licenciado sob a licença MIT.  
 Consulte o arquivo [LICENSE](LICENSE) para mais detalhes.
-
