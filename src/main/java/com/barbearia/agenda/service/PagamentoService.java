@@ -26,9 +26,9 @@ public class PagamentoService {
     @Value("${mp.access-token}")
     private String mpToken;
 
-    // DICA: se quiser, extraia isso para application.properties no futuro
-    private static final String NOTIFICATION_URL =
-            "https://botchiest-unpenuriously-zenobia.ngrok-free.dev/pagamentos/webhook";
+    @Value("${mp.notification-url}")
+    private String notificationUrl;
+
 
     private final AgendamentoRepository agendamentoRepo;
     private final PagamentoRepository pagamentoRepo;
@@ -86,7 +86,7 @@ public class PagamentoService {
         Map<String, Object> body = Map.of(
                 "items", List.of(item),
                 "external_reference", pagamento.getId().toString(),
-                "notification_url", NOTIFICATION_URL
+                "notification_url", notificationUrl
         );
 
         HttpHeaders headers = new HttpHeaders();
