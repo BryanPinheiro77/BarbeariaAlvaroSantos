@@ -23,6 +23,9 @@ import java.util.Map;
 @Service
 public class PagamentoService {
 
+    @Value("${app.frontend-url}")
+    private String frontendUrl;
+
     @Value("${mp.access-token}")
     private String mpToken;
 
@@ -81,12 +84,21 @@ public class PagamentoService {
                 "unit_price", pagamento.getValor().doubleValue()
         );
 
-        // IMPORTANTE:
-        // external_reference = ID do seu Pagamento, para mapear webhook -> pagamento interno SEM depender de preference_id
+        // rota do teu front que vai tratar retorno e mandar voltar pro agendamento
+        String retorno = frontendUrl + "/pagamento/retorno";
+
+        Map<String, Object> backUrls = Map.of(
+                "success", retorno,
+                "failure", retorno,
+                "pending", retorno
+        );
+
         Map<String, Object> body = Map.of(
                 "items", List.of(item),
                 "external_reference", pagamento.getId().toString(),
-                "notification_url", notificationUrl
+                "notification_url", notificationUrl,
+                "back_urls", backUrls,
+                "auto_return", "approved"
         );
 
         HttpHeaders headers = new HttpHeaders();
@@ -94,7 +106,6 @@ public class PagamentoService {
         headers.setBearerAuth(mpToken);
 
         RestTemplate client = new RestTemplate();
-
         ResponseEntity<Map> resp =
                 client.postForEntity(url, new HttpEntity<>(body, headers), Map.class);
 
@@ -105,21 +116,14 @@ public class PagamentoService {
 
         String preferenceId = responseBody.get("id").toString();
 
-        // Atenção: no MP Brasil, token de teste pode vir como APP_USR.
-        // Então o melhor é escolher init_point baseado na presença de sandbox_init_point.
-        String initPoint = responseBody.get("init_point").toString();
+        // Regra prática: se existir sandbox_init_point, usa ele; senão init_point
+        String initPoint = String.valueOf(responseBody.get("init_point"));
         if (responseBody.get("sandbox_init_point") != null) {
-            // se existir, melhor para testes
-            initPoint = responseBody.get("sandbox_init_point").toString();
+            initPoint = String.valueOf(responseBody.get("sandbox_init_point"));
         }
 
-        // Salva gatewayId como preferenceId (continua útil como fallback)
         pagamento.setGatewayId(preferenceId);
         pagamentoRepo.save(pagamento);
-
-        System.out.println("✅ Checkout Pro criado | pagamentoId=" + pagamento.getId()
-                + " | preferenceId=" + preferenceId
-                + " | initPoint=" + initPoint);
 
         return new PagamentoCreateResponse(
                 pagamento.getId(),
