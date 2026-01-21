@@ -1,9 +1,9 @@
 package com.barbearia.agenda.controller;
 
+import com.barbearia.agenda.dto.ClienteChangePasswordRequest;
 import com.barbearia.agenda.dto.ClienteCreateRequest;
 import com.barbearia.agenda.dto.ClienteResponse;
 import com.barbearia.agenda.dto.ClienteUpdateRequest;
-import com.barbearia.agenda.dto.ClienteChangePasswordRequest;
 import com.barbearia.agenda.model.Cliente;
 import com.barbearia.agenda.repository.ClienteRepository;
 import com.barbearia.agenda.security.AuthUtils;
@@ -20,16 +20,13 @@ public class ClienteController {
 
     private final ClienteRepository clienteRepository;
     private final PasswordEncoder passwordEncoder;
-    private final AuthUtils authUtils;
 
     public ClienteController(
             ClienteRepository clienteRepository,
-            PasswordEncoder passwordEncoder,
-            AuthUtils authUtils
+            PasswordEncoder passwordEncoder
     ) {
         this.clienteRepository = clienteRepository;
         this.passwordEncoder = passwordEncoder;
-        this.authUtils = authUtils;
     }
 
     // =============================================================
@@ -44,25 +41,19 @@ public class ClienteController {
         cliente.setTelefone(req.telefone());
         cliente.setCriadoEm(LocalDateTime.now());
 
-        // Criptografa a senha aqui
         cliente.setSenhaHash(passwordEncoder.encode(req.senha()));
 
         Cliente salvo = clienteRepository.save(cliente);
-
         return ResponseEntity.ok(toResponse(salvo));
     }
 
     // =============================================================
-    // CLIENTE (CONFIGURAÇÕES / MINHA CONTA)
+    // CLIENTE (MINHA CONTA)
     // =============================================================
 
-    /**
-     * Retorna os dados do cliente logado.
-     * Requer ROLE_CLIENTE no SecurityConfig.
-     */
     @GetMapping("/me")
     public ResponseEntity<ClienteResponse> me() {
-        String email = authUtils.getAuthenticatedEmail();
+        String email = AuthUtils.getAuthenticatedEmail();
 
         Cliente cliente = clienteRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Cliente autenticado não encontrado"));
@@ -70,13 +61,9 @@ public class ClienteController {
         return ResponseEntity.ok(toResponse(cliente));
     }
 
-    /**
-     * Atualiza nome/email/telefone do cliente logado.
-     * Não muda senha aqui.
-     */
     @PatchMapping("/me")
     public ResponseEntity<ClienteResponse> atualizarMe(@RequestBody ClienteUpdateRequest req) {
-        String email = authUtils.getAuthenticatedEmail();
+        String email = AuthUtils.getAuthenticatedEmail();
 
         Cliente cliente = clienteRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Cliente autenticado não encontrado"));
@@ -95,12 +82,9 @@ public class ClienteController {
         return ResponseEntity.ok(toResponse(atualizado));
     }
 
-    /**
-     * Troca a senha do cliente logado (com validação da senha atual).
-     */
     @PatchMapping("/me/senha")
     public ResponseEntity<Void> trocarSenha(@RequestBody ClienteChangePasswordRequest req) {
-        String email = authUtils.getAuthenticatedEmail();
+        String email = AuthUtils.getAuthenticatedEmail();
 
         Cliente cliente = clienteRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Cliente autenticado não encontrado"));
@@ -112,7 +96,6 @@ public class ClienteController {
 
         boolean senhaAtualOk = passwordEncoder.matches(req.senhaAtual(), cliente.getSenhaHash());
         if (!senhaAtualOk) {
-            // Evita vazar detalhe (resposta simples)
             return ResponseEntity.status(401).build();
         }
 
@@ -124,8 +107,6 @@ public class ClienteController {
 
     // =============================================================
     // ADMIN (CRUD POR ID)
-    // Obs: deixe o SecurityConfig restringir /clientes/** para ADMIN,
-    // mas libere explicitamente /clientes/registrar e /clientes/me* para CLIENTE.
     // =============================================================
 
     @GetMapping
@@ -146,10 +127,6 @@ public class ClienteController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    /**
-     * ADMIN atualiza tudo (incluindo senha) por ID.
-     * Mantive teu comportamento atual usando ClienteCreateRequest.
-     */
     @PutMapping("/{id}")
     public ResponseEntity<ClienteResponse> atualizarCliente(
             @PathVariable("id") long id,
@@ -160,8 +137,6 @@ public class ClienteController {
                     cliente.setNome(req.nome());
                     cliente.setEmail(req.email());
                     cliente.setTelefone(req.telefone());
-
-                    // Atualiza senha criptografada
                     cliente.setSenhaHash(passwordEncoder.encode(req.senha()));
 
                     Cliente atualizado = clienteRepository.save(cliente);
