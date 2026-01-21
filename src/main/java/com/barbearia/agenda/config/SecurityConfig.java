@@ -35,28 +35,53 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                        // PÚBLICAS
+                        // =========================
+                        // ROTAS PÚBLICAS
+                        // =========================
                         .requestMatchers("/auth/login", "/clientes/registrar").permitAll()
                         .requestMatchers(HttpMethod.GET, "/servicos/ativos").permitAll()
                         .requestMatchers("/pagamentos/webhook", "/pagamentos/webhook/**").permitAll()
                         .requestMatchers("/agendamentos/horarios-disponiveis").permitAll()
 
+                        // =========================
                         // ADMIN
+                        // =========================
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .requestMatchers("/servicos/**").hasRole("ADMIN")
 
+                        // =========================
+                        // CLIENTES (ADMIN gerencia por ID)
+                        // =========================
+                        .requestMatchers(HttpMethod.GET, "/clientes").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/clientes/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/clientes/*").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/clientes/*").hasRole("ADMIN")
+
+                        // =========================
+                        // CLIENTE (MINHA CONTA)
+                        // =========================
+                        .requestMatchers(HttpMethod.GET, "/clientes/me").hasRole("CLIENTE")
+                        .requestMatchers(HttpMethod.PATCH, "/clientes/me").hasRole("CLIENTE")
+                        .requestMatchers(HttpMethod.PATCH, "/clientes/me/senha").hasRole("CLIENTE")
+
+                        // =========================
                         // PAGAMENTOS (CLIENTE)
+                        // =========================
                         .requestMatchers(HttpMethod.POST, "/pagamentos/criar").hasRole("CLIENTE")
                         .requestMatchers(HttpMethod.GET, "/pagamentos/*").hasRole("CLIENTE")
                         .requestMatchers(HttpMethod.GET, "/pagamentos/agendamentos/**").hasRole("CLIENTE")
 
+                        // =========================
                         // PAGAMENTOS (ADMIN)
+                        // =========================
                         .requestMatchers(HttpMethod.GET, "/pagamentos").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/pagamentos/*/confirmar-manual").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/pagamentos/*/cancelar").hasRole("ADMIN")
                         .requestMatchers("/pagamentos/mock/**").hasRole("ADMIN")
 
-                        // CLIENTE (AGENDAMENTOS)
+                        // =========================
+                        // AGENDAMENTOS (CLIENTE)
+                        // =========================
                         .requestMatchers("/agendamentos/**").hasRole("CLIENTE")
 
                         .anyRequest().authenticated()
