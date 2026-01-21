@@ -109,13 +109,13 @@ public class AgendamentoService {
                     req.data() + " às " + req.horarioInicio() + " ✂️";
 
             boolean enviado = wahaClient.sendText(cliente.getTelefone(), mensagem);
-
             if (enviado) {
                 salvo.setEnviadoConfirmacao(true);
                 agendamentoRepo.save(salvo);
             } else {
                 System.err.println("WhatsApp NÃO enviado (WAHA retornou falha). Não marcando enviadoConfirmacao.");
             }
+
 
         } catch (Exception e) {
             System.err.println("Erro ao enviar WhatsApp:");
