@@ -136,7 +136,7 @@ public class PagamentoService {
     }
 
     // =============================================================
-    // 3) PIX DIRECT (teste/real) — cria payment e salva gatewayId = paymentId
+    // 3) PIX DIRECT (real)
     // =============================================================
     private PagamentoCreateResponse criarPixDirect(Pagamento pagamento) {
 
@@ -146,11 +146,13 @@ public class PagamentoService {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(mpToken);
 
-        // IMPORTANTE:
-        // Para PIX direct em ambiente de teste, o email ideal é de um TEST USER criado no painel.
-        // Se usar email fake, pode dar 401/erro.
+        String emailCliente = pagamento.getAgendamento().getCliente().getEmail();
+        if (emailCliente == null || emailCliente.isBlank()) {
+            throw new RuntimeException("Cliente sem email cadastrado. Não é possível gerar PIX.");
+        }
+
         Map<String, Object> payer = Map.of(
-                "email", "test_user_123@testuser.com"
+                "email", emailCliente
         );
 
         Map<String, Object> body = Map.of(
@@ -158,7 +160,6 @@ public class PagamentoService {
                 "description", "Pagamento #" + pagamento.getId(),
                 "payment_method_id", "pix",
                 "payer", payer,
-                // também ajuda mapear retorno do MP pro seu pagamento interno
                 "external_reference", pagamento.getId().toString()
         );
 
@@ -169,34 +170,20 @@ public class PagamentoService {
                     client.postForEntity(url, new HttpEntity<>(body, headers), Map.class);
 
             Map<String, Object> payment = resp.getBody();
-            System.out.println("🔁 MP /v1/payments status=" + resp.getStatusCode().value() + " body=" + payment);
-
             if (payment == null) {
                 throw new RuntimeException("Erro ao criar pagamento PIX: resposta vazia");
             }
 
             Long paymentId = Long.valueOf(payment.get("id").toString());
 
-            // Para PIX direct, o gatewayId é o paymentId
             pagamento.setGatewayId(paymentId.toString());
             pagamentoRepo.save(pagamento);
 
-            Object poiObj = payment.get("point_of_interaction");
-            if (!(poiObj instanceof Map)) {
-                throw new RuntimeException("Resposta MP não contém point_of_interaction: " + payment);
-            }
-            Map<String, Object> poi = (Map<String, Object>) poiObj;
-
-            Object txObj = poi.get("transaction_data");
-            if (!(txObj instanceof Map)) {
-                throw new RuntimeException("Resposta MP não contém transaction_data: " + poi);
-            }
-            Map<String, Object> txData = (Map<String, Object>) txObj;
+            Map<String, Object> poi = (Map<String, Object>) payment.get("point_of_interaction");
+            Map<String, Object> txData = (Map<String, Object>) poi.get("transaction_data");
 
             String qrBase64 = String.valueOf(txData.get("qr_code_base64"));
             String copiaCola = String.valueOf(txData.get("qr_code"));
-
-            System.out.println("⚡ PIX criado | pagamentoIdInterno=" + pagamento.getId() + " | paymentIdMP=" + paymentId);
 
             return new PagamentoCreateResponse(
                     pagamento.getId(),
@@ -208,14 +195,10 @@ public class PagamentoService {
             );
 
         } catch (HttpClientErrorException e) {
-            String respBody = e.getResponseBodyAsString();
-            System.out.println("❌ Erro HTTP ao criar PIX: " + e.getStatusCode() + " - " + respBody);
-            throw new RuntimeException("Erro ao criar pagamento PIX: " + respBody, e);
-        } catch (Exception e) {
-            System.out.println("❌ Erro inesperado ao criar PIX: " + e.getMessage());
-            throw new RuntimeException("Erro ao criar pagamento PIX: " + e.getMessage(), e);
+            throw new RuntimeException("Erro ao criar pagamento PIX: " + e.getResponseBodyAsString(), e);
         }
     }
+
 
     // =============================================================
     // 4) PROCESSAR MERCHANT_ORDER (quando o webhook vier como merchant_order)
