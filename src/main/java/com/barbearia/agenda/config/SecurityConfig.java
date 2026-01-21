@@ -50,6 +50,13 @@ public class SecurityConfig {
                         .requestMatchers("/servicos/**").hasRole("ADMIN")
 
                         // =========================
+                        // CLIENTE (MINHA CONTA)
+                        // =========================
+                        .requestMatchers(HttpMethod.GET, "/clientes/me").hasRole("CLIENTE")
+                        .requestMatchers(HttpMethod.PATCH, "/clientes/me").hasRole("CLIENTE")
+                        .requestMatchers(HttpMethod.PATCH, "/clientes/me/senha").hasRole("CLIENTE")
+
+                        // =========================
                         // CLIENTES (ADMIN gerencia por ID)
                         // =========================
                         .requestMatchers(HttpMethod.GET, "/clientes").hasRole("ADMIN")
@@ -57,12 +64,6 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/clientes/*").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/clientes/*").hasRole("ADMIN")
 
-                        // =========================
-                        // CLIENTE (MINHA CONTA)
-                        // =========================
-                        .requestMatchers(HttpMethod.GET, "/clientes/me").hasRole("CLIENTE")
-                        .requestMatchers(HttpMethod.PATCH, "/clientes/me").hasRole("CLIENTE")
-                        .requestMatchers(HttpMethod.PATCH, "/clientes/me/senha").hasRole("CLIENTE")
 
                         // =========================
                         // PAGAMENTOS (CLIENTE)
