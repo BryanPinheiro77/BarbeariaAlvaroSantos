@@ -1,65 +1,68 @@
 package com.barbearia.agenda.integration;
 
-
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-import jakarta.annotation.PostConstruct;
+
 import java.util.HashMap;
 import java.util.Map;
 
-    @Service
-    public class WahaClient {
+@Service
+public class WahaClient {
 
-        private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate = new RestTemplate();
 
-        @Value("${WAHA_BASE_URL:http://localhost:3000}")
-        private String baseUrl;
+    @Value("${waha.base-url:http://localhost:3000}")
+    private String baseUrl;
 
-        @Value("${WAHA_API_KEY:}")
-        private String apiKey;
+    @Value("${waha.api-key:}")
+    private String apiKey;
 
-        @PostConstruct
-        public void init() {
-            System.out.println("✅ WAHA: Cliente de integração configurado em: " + baseUrl);
-        }
+    @Value("${waha.session:default}")
+    private String session;
 
-        public void sendText(String phoneNumber, String message) {
-            try {
-                String url = baseUrl + "/api/sendText";
+    @PostConstruct
+    public void init() {
+        System.out.println("WAHA: Cliente de integração configurado em: " + baseUrl);
+    }
 
-                // Garante que o número tenha o formato correto (ex: 5511999999999)
-                String formattedNumber = formatNumber(phoneNumber);
+    public void sendText(String phoneNumber, String message) {
+        try {
+            String url = baseUrl + "/api/sendText";
 
-                Map<String, Object> body = new HashMap<>();
-                body.add("chatId", formattedNumber + "@c.us");
-                body.add("text", message);
-                body.add("session", "default"); // Nome da sessão configurada no WAHA
+            // Garante que o número tenha o formato correto (ex: 5511999999999)
+            String formattedNumber = formatNumber(phoneNumber);
 
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.APPLICATION_JSON);
-                if (!apiKey.isEmpty()) {
-                    headers.set("X-Api-Key", apiKey);
-                }
+            Map<String, Object> body = new HashMap<>();
+            body.put("chatId", formattedNumber + "@c.us");
+            body.put("text", message);
+            body.put("session", session);
 
-                HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
-
-                ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
-
-                if (response.getStatusCode().is2xxSuccessful()) {
-                    System.out.println("✅ Mensagem enviada para: " + phoneNumber);
-                }
-            } catch (Exception e) {
-                System.err.println("❌ Erro ao enviar mensagem WAHA: " + e.getMessage());
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            if (apiKey != null && !apiKey.isBlank()) {
+                headers.set("X-Api-Key", apiKey);
             }
-        }
 
-        private String formatNumber(String number) {
-            // Remove caracteres não numéricos
-            String clean = number.replaceAll("\\D", "");
-            // Se não tiver o 55 (Brasil), adiciona
-            return clean.startsWith("55") ? clean : "55" + clean;
+            HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
+
+            ResponseEntity<String> response =
+                    restTemplate.postForEntity(url, request, String.class);
+
+            if (response.getStatusCode().is2xxSuccessful()) {
+                System.out.println("Mensagem enviada para: " + phoneNumber);
+            } else {
+                System.err.println("WAHA retornou status: " + response.getStatusCode());
+            }
+        } catch (Exception e) {
+            System.err.println("Erro ao enviar mensagem WAHA: " + e.getMessage());
         }
+    }
+
+    private String formatNumber(String number) {
+        String clean = number == null ? "" : number.replaceAll("\\D", "");
+        return clean.startsWith("55") ? clean : "55" + clean;
     }
 }
