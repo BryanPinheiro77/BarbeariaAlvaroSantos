@@ -1,8 +1,8 @@
 package com.barbearia.agenda.dto;
 
-public record ClienteUpdateRequest (
+public record ClienteUpdateRequest(
         String nome,
+        String email,
         String telefone,
-        String email
-
+        String senhaAtual // obrigatória se trocar email/telefone
 ) {}

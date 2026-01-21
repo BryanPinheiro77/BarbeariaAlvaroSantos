@@ -61,20 +61,54 @@ public class ClienteController {
         return ResponseEntity.ok(toResponse(cliente));
     }
 
+    /**
+     * Atualiza nome/email/telefone do cliente logado.
+     * Regra: se trocar email OU telefone, exige senhaAtual válida.
+     */
     @PatchMapping("/me")
     public ResponseEntity<ClienteResponse> atualizarMe(@RequestBody ClienteUpdateRequest req) {
-        String email = AuthUtils.getAuthenticatedEmail();
+        String emailAuth = AuthUtils.getAuthenticatedEmail();
 
-        Cliente cliente = clienteRepository.findByEmail(email)
+        Cliente cliente = clienteRepository.findByEmail(emailAuth)
                 .orElseThrow(() -> new RuntimeException("Cliente autenticado não encontrado"));
 
+        boolean querTrocarEmail = req.email() != null
+                && !req.email().isBlank()
+                && !req.email().equalsIgnoreCase(cliente.getEmail());
+
+        boolean querTrocarTelefone = req.telefone() != null
+                && !req.telefone().isBlank()
+                && (cliente.getTelefone() == null || !req.telefone().equals(cliente.getTelefone()));
+
+        // Se for trocar email/telefone, exige senha atual
+        if (querTrocarEmail || querTrocarTelefone) {
+            if (req.senhaAtual() == null || req.senhaAtual().isBlank()) {
+                // melhor do que 500: diz que faltou dado
+                return ResponseEntity.badRequest().build();
+            }
+
+            boolean senhaAtualOk = passwordEncoder.matches(req.senhaAtual(), cliente.getSenhaHash());
+            if (!senhaAtualOk) {
+                return ResponseEntity.status(401).build();
+            }
+        }
+
+        // Atualiza nome (sem exigir senha)
         if (req.nome() != null && !req.nome().isBlank()) {
             cliente.setNome(req.nome());
         }
-        if (req.email() != null && !req.email().isBlank()) {
+
+        // Atualiza email (com verificação de duplicidade)
+        if (querTrocarEmail) {
+            var existente = clienteRepository.findByEmail(req.email());
+            if (existente.isPresent() && existente.get().getId() != cliente.getId()) {
+                return ResponseEntity.status(409).build(); // email já em uso
+            }
             cliente.setEmail(req.email());
         }
-        if (req.telefone() != null && !req.telefone().isBlank()) {
+
+        // Atualiza telefone
+        if (querTrocarTelefone) {
             cliente.setTelefone(req.telefone());
         }
 
