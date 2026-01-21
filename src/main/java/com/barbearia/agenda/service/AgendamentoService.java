@@ -1,5 +1,6 @@
 package com.barbearia.agenda.service;
 
+import com.barbearia.agenda.integration.WahaClient;
 import com.barbearia.agenda.dto.AgendamentoCreateRequest;
 import com.barbearia.agenda.model.*;
 import com.barbearia.agenda.repository.AgendamentoRepository;
@@ -15,6 +16,7 @@ import java.util.List;
 @Service
 public class AgendamentoService {
 
+    private final WahaClient wahaClient;
     private final AgendamentoRepository agendamentoRepo;
     private final ClienteRepository clienteRepo;
     private final ServicoRepository servicoRepo;
@@ -22,11 +24,13 @@ public class AgendamentoService {
     public AgendamentoService(
             AgendamentoRepository agendamentoRepo,
             ClienteRepository clienteRepo,
-            ServicoRepository servicoRepo
+            ServicoRepository servicoRepo,
+            WahaClient wahaClient
     ) {
         this.agendamentoRepo = agendamentoRepo;
         this.clienteRepo = clienteRepo;
         this.servicoRepo = servicoRepo;
+        this.wahaClient = wahaClient;
     }
 
     @Transactional
@@ -95,8 +99,27 @@ public class AgendamentoService {
             link.setServico(s);
             a.getServicos().add(link);
         }
+        // 6) Salva no banco
+        Agendamento salvo = agendamentoRepo.save(a);
 
-        return agendamentoRepo.save(a);
+        // 7) Envia WhatsApp após salvar
+        try {
+            String mensagem = "Olá " + cliente.getNome() +
+                    "! Seu horário na Barbearia Álvaro Santos foi confirmado para " +
+                    req.data() + " às " + req.horarioInicio() + " ✂️";
+
+            wahaClient.sendText(cliente.getTelefone(), mensagem);
+
+            // Marca como enviado e persiste
+            salvo.setEnviadoConfirmacao(true);
+            agendamentoRepo.save(salvo);
+
+        } catch (Exception e) {
+            System.err.println("Erro ao enviar WhatsApp: " + e.getMessage());
+            // Não interrompe o fluxo
+        }
+        // 8) Retorna o agendamento salvo
+        return salvo;
     }
 
     @Transactional(readOnly = true)
