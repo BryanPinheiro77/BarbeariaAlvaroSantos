@@ -74,7 +74,6 @@ public class AgendamentoService {
             throw new RuntimeException("Horário já reservado!");
         }
 
-
         // 4) Cria agendamento
         Agendamento a = new Agendamento();
         a.setCliente(cliente);
@@ -99,25 +98,31 @@ public class AgendamentoService {
             link.setServico(s);
             a.getServicos().add(link);
         }
+
         // 6) Salva no banco
         Agendamento salvo = agendamentoRepo.save(a);
 
-        // 7) Envia WhatsApp após salvar
+        // 7) Envia WhatsApp após salvar (somente marca como enviado se realmente enviou)
         try {
             String mensagem = "Olá " + cliente.getNome() +
                     "! Seu horário na Barbearia Álvaro Santos foi confirmado para " +
                     req.data() + " às " + req.horarioInicio() + " ✂️";
 
-            wahaClient.sendText(cliente.getTelefone(), mensagem);
+            boolean enviado = wahaClient.sendText(cliente.getTelefone(), mensagem);
 
-            // Marca como enviado e persiste
-            salvo.setEnviadoConfirmacao(true);
-            agendamentoRepo.save(salvo);
+            if (enviado) {
+                salvo.setEnviadoConfirmacao(true);
+                agendamentoRepo.save(salvo);
+            } else {
+                System.err.println("WhatsApp NÃO enviado (WAHA retornou falha). Não marcando enviadoConfirmacao.");
+            }
 
         } catch (Exception e) {
-            System.err.println("Erro ao enviar WhatsApp: " + e.getMessage());
+            System.err.println("Erro ao enviar WhatsApp:");
+            e.printStackTrace();
             // Não interrompe o fluxo
         }
+
         // 8) Retorna o agendamento salvo
         return salvo;
     }
@@ -153,5 +158,4 @@ public class AgendamentoService {
         ag.setStatus(StatusAgendamento.CANCELADO);
         return agendamentoRepo.save(ag);
     }
-
 }
