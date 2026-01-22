@@ -200,7 +200,8 @@ public class PagamentoService {
                 "description", "Pagamento #" + pagamento.getId(),
                 "payment_method_id", "pix",
                 "payer", payer,
-                "external_reference", pagamento.getId().toString()
+                "external_reference", pagamento.getId().toString(),
+                "notification_url", notificationUrl
         );
 
         RestTemplate client = new RestTemplate();
