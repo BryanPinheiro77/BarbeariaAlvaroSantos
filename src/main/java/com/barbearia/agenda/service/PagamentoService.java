@@ -17,6 +17,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -102,13 +103,19 @@ public class PagamentoService {
                 "pending", retorno
         );
 
-        Map<String, Object> body = Map.of(
-                "items", List.of(item),
-                "external_reference", pagamento.getId().toString(),
-                "notification_url", notificationUrl,
-                "back_urls", backUrls,
-                "auto_return", "approved"
-        );
+        // Map mutável para permitir campos extras (statement_descriptor etc.)
+        Map<String, Object> body = new HashMap<>();
+        body.put("items", List.of(item));
+        body.put("external_reference", pagamento.getId().toString());
+        body.put("notification_url", notificationUrl);
+        body.put("back_urls", backUrls);
+        body.put("auto_return", "approved");
+
+        // aparece na fatura do cartão (evite acentos e caracteres especiais)
+        body.put("statement_descriptor", "BARBEARIA ALVARO");
+
+        // opcional: deixar DESLIGADO por enquanto para não reduzir aprovações por "análise"
+        // body.put("binary_mode", true);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -124,9 +131,6 @@ public class PagamentoService {
         }
 
         String preferenceId = String.valueOf(responseBody.get("id"));
-
-        // PRODUÇÃO: usar init_point
-        // SANDBOX: usar sandbox_init_point
         String checkoutUrl = escolherCheckoutUrl(responseBody);
 
         pagamento.setGatewayId(preferenceId);
