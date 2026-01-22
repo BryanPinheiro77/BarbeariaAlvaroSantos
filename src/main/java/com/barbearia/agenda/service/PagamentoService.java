@@ -19,6 +19,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class PagamentoService {
@@ -151,7 +152,6 @@ public class PagamentoService {
     private String escolherCheckoutUrl(Map<String, Object> responseBody) {
 
         boolean tokenPareceTeste = mpToken != null && mpToken.startsWith("TEST-");
-
         boolean usarSandbox = mpSandbox || tokenPareceTeste;
 
         if (usarSandbox) {
@@ -179,6 +179,14 @@ public class PagamentoService {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(mpToken);
+
+        // MERCADO PAGO: obrigatório para /v1/payments (evita duplicidade em retries)
+        // Opção mais segura (determinística): usar o id do pagamento interno
+        // Assim, se o front repetir a request, o MP não cria outro pagamento duplicado.
+        headers.add("X-Idempotency-Key", "pix-" + pagamento.getId());
+
+        // Se você preferir sempre "novo pagamento" ao repetir, use UUID:
+        // headers.add("X-Idempotency-Key", UUID.randomUUID().toString());
 
         String emailCliente = pagamento.getAgendamento().getCliente().getEmail();
         if (emailCliente == null || emailCliente.isBlank()) {
@@ -212,7 +220,11 @@ public class PagamentoService {
             pagamentoRepo.save(pagamento);
 
             Map<String, Object> poi = (Map<String, Object>) payment.get("point_of_interaction");
-            Map<String, Object> txData = (Map<String, Object>) poi.get("transaction_data");
+            Map<String, Object> txData = poi == null ? null : (Map<String, Object>) poi.get("transaction_data");
+
+            if (txData == null) {
+                throw new RuntimeException("Pagamento PIX criado, mas sem transaction_data (QR). Resposta: " + payment);
+            }
 
             String qrBase64 = String.valueOf(txData.get("qr_code_base64"));
             String copiaCola = String.valueOf(txData.get("qr_code"));
