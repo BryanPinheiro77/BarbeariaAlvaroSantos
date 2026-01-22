@@ -32,6 +32,15 @@ public class PagamentoService {
     @Value("${mp.notification-url}")
     private String notificationUrl;
 
+    /**
+     * Opcional: controle explícito de sandbox via env var.
+     * No Railway, se quiser usar:
+     * MP_SANDBOX=false (produção) / true (sandbox)
+     *
+     * Se você não criar, o default é false.
+     */
+    @Value("${mp.sandbox:false}")
+    private boolean mpSandbox;
 
     private final AgendamentoRepository agendamentoRepo;
     private final PagamentoRepository pagamentoRepo;
@@ -84,7 +93,6 @@ public class PagamentoService {
                 "unit_price", pagamento.getValor().doubleValue()
         );
 
-        // rota do teu front que vai tratar retorno e mandar voltar pro agendamento
         String retorno = frontendUrl + "/pagamento/retorno";
 
         Map<String, Object> backUrls = Map.of(
@@ -114,13 +122,11 @@ public class PagamentoService {
             throw new RuntimeException("Mercado Pago retornou body vazio ao criar preferência.");
         }
 
-        String preferenceId = responseBody.get("id").toString();
+        String preferenceId = String.valueOf(responseBody.get("id"));
 
-        // Regra prática: se existir sandbox_init_point, usa ele; senão init_point
-        String initPoint = String.valueOf(responseBody.get("init_point"));
-        if (responseBody.get("sandbox_init_point") != null) {
-            initPoint = String.valueOf(responseBody.get("sandbox_init_point"));
-        }
+        // PRODUÇÃO: usar init_point
+        // SANDBOX: usar sandbox_init_point
+        String checkoutUrl = escolherCheckoutUrl(responseBody);
 
         pagamento.setGatewayId(preferenceId);
         pagamentoRepo.save(pagamento);
@@ -131,8 +137,36 @@ public class PagamentoService {
                 pagamento.getStatus().name(),
                 null,
                 null,
-                initPoint
+                checkoutUrl
         );
+    }
+
+    /**
+     * Decide se retorna link de produção ou sandbox.
+     * Regra:
+     * 1) Se mp.sandbox=true => sandbox_init_point
+     * 2) Senão, se token aparenta ser de teste => sandbox_init_point
+     * 3) Caso contrário => init_point (produção)
+     */
+    private String escolherCheckoutUrl(Map<String, Object> responseBody) {
+
+        boolean tokenPareceTeste = mpToken != null && mpToken.startsWith("TEST-");
+
+        boolean usarSandbox = mpSandbox || tokenPareceTeste;
+
+        if (usarSandbox) {
+            Object sandbox = responseBody.get("sandbox_init_point");
+            if (sandbox == null) {
+                throw new RuntimeException("Preferência retornou sem sandbox_init_point, mas o ambiente está em sandbox.");
+            }
+            return String.valueOf(sandbox);
+        }
+
+        Object initPoint = responseBody.get("init_point");
+        if (initPoint == null) {
+            throw new RuntimeException("Preferência retornou sem init_point (produção).");
+        }
+        return String.valueOf(initPoint);
     }
 
     // =============================================================
@@ -151,9 +185,7 @@ public class PagamentoService {
             throw new RuntimeException("Cliente sem email cadastrado. Não é possível gerar PIX.");
         }
 
-        Map<String, Object> payer = Map.of(
-                "email", emailCliente
-        );
+        Map<String, Object> payer = Map.of("email", emailCliente);
 
         Map<String, Object> body = Map.of(
                 "transaction_amount", pagamento.getValor().doubleValue(),
@@ -174,7 +206,7 @@ public class PagamentoService {
                 throw new RuntimeException("Erro ao criar pagamento PIX: resposta vazia");
             }
 
-            Long paymentId = Long.valueOf(payment.get("id").toString());
+            Long paymentId = Long.valueOf(String.valueOf(payment.get("id")));
 
             pagamento.setGatewayId(paymentId.toString());
             pagamentoRepo.save(pagamento);
@@ -198,7 +230,6 @@ public class PagamentoService {
             throw new RuntimeException("Erro ao criar pagamento PIX: " + e.getResponseBodyAsString(), e);
         }
     }
-
 
     // =============================================================
     // 4) PROCESSAR MERCHANT_ORDER (quando o webhook vier como merchant_order)
@@ -225,7 +256,6 @@ public class PagamentoService {
             return;
         }
 
-        // pega o primeiro payment associado
         Long paymentId = Long.valueOf(payments.get(0).get("id").toString());
         processarPagamentoDireto(paymentId);
     }
@@ -257,7 +287,6 @@ public class PagamentoService {
                     + " | external_reference=" + externalRefObj
                     + " | preference_id=" + preferenceObj);
 
-            // (A) Melhor caminho: achar pelo external_reference (ID do seu Pagamento)
             if (externalRefObj != null) {
                 Long pagamentoIdInterno = Long.valueOf(externalRefObj.toString());
                 Pagamento pagamento = pagamentoRepo.findById(pagamentoIdInterno).orElse(null);
@@ -268,7 +297,6 @@ public class PagamentoService {
                 }
             }
 
-            // (B) Fallback: Checkout Pro usando preference_id (quando vier)
             if (preferenceObj != null) {
                 String preferenceId = preferenceObj.toString();
                 Pagamento pagamento = pagamentoRepo.findByGatewayId(preferenceId);
@@ -281,7 +309,6 @@ public class PagamentoService {
                 return;
             }
 
-            // (C) Fallback: Pix Direct (gatewayId = paymentId)
             Pagamento pagamento = pagamentoRepo.findByGatewayId(paymentId.toString());
             if (pagamento != null) {
                 atualizarStatusPagamento(pagamento, status);
