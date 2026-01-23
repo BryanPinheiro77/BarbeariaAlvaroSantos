@@ -2,8 +2,10 @@ package com.barbearia.agenda.service;
 
 import com.barbearia.agenda.dto.PagamentoCreateRequest;
 import com.barbearia.agenda.dto.PagamentoCreateResponse;
+import com.barbearia.agenda.integration.WahaClient;
 import com.barbearia.agenda.model.Agendamento;
 import com.barbearia.agenda.model.Pagamento;
+import com.barbearia.agenda.model.StatusAgendamento;
 import com.barbearia.agenda.model.StatusPagamento;
 import com.barbearia.agenda.model.TipoPagamentoStrategy;
 import com.barbearia.agenda.repository.AgendamentoRepository;
@@ -12,6 +14,7 @@ import com.barbearia.agenda.repository.PagamentoRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
@@ -20,7 +23,6 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 @Service
 public class PagamentoService {
@@ -34,28 +36,29 @@ public class PagamentoService {
     @Value("${mp.notification-url}")
     private String notificationUrl;
 
-    /**
-     * Opcional: controle explícito de sandbox via env var.
-     * No Railway, se quiser usar:
-     * MP_SANDBOX=false (produção) / true (sandbox)
-     *
-     * Se você não criar, o default é false.
-     */
     @Value("${mp.sandbox:false}")
     private boolean mpSandbox;
 
+    private static final int EXPIRACAO_MINUTOS = 15;
+
     private final AgendamentoRepository agendamentoRepo;
     private final PagamentoRepository pagamentoRepo;
+    private final WahaClient wahaClient;
 
-    public PagamentoService(AgendamentoRepository agendamentoRepo,
-                            PagamentoRepository pagamentoRepo) {
+    public PagamentoService(
+            AgendamentoRepository agendamentoRepo,
+            PagamentoRepository pagamentoRepo,
+            WahaClient wahaClient
+    ) {
         this.agendamentoRepo = agendamentoRepo;
         this.pagamentoRepo = pagamentoRepo;
+        this.wahaClient = wahaClient;
     }
 
     // =============================================================
-    // 1) CRIAR PAGAMENTO
+    // 1) CRIAR PAGAMENTO (marca expiraEm em 15min)
     // =============================================================
+    @Transactional
     public PagamentoCreateResponse criarPagamento(PagamentoCreateRequest req) {
 
         Agendamento agendamento = agendamentoRepo.findById(req.agendamentoId())
@@ -65,12 +68,18 @@ public class PagamentoService {
             throw new RuntimeException("Agendamento não possui serviços para calcular o total.");
         }
 
+        // Se já expirou/cancelou, não gera pagamento
+        if (agendamento.getStatus() == StatusAgendamento.CANCELADO) {
+            throw new RuntimeException("Agendamento cancelado. Não é possível gerar pagamento.");
+        }
+
         Pagamento pagamento = new Pagamento();
         pagamento.setAgendamento(agendamento);
         pagamento.setValor(calcularTotalAgendamento(agendamento));
         pagamento.setMetodo(req.tipoPagamento()); // "PIX" ou "CARTAO"
         pagamento.setStatus(StatusPagamento.PENDENTE);
         pagamento.setCriadoEm(LocalDateTime.now());
+        pagamento.setExpiraEm(LocalDateTime.now().plusMinutes(EXPIRACAO_MINUTOS));
         pagamento = pagamentoRepo.save(pagamento);
 
         TipoPagamentoStrategy estrategia = req.estrategia();
@@ -82,7 +91,7 @@ public class PagamentoService {
     }
 
     // =============================================================
-    // 2) CHECKOUT PRO — preferência com external_reference (ID interno)
+    // 2) CHECKOUT PRO
     // =============================================================
     private PagamentoCreateResponse criarCheckoutPro(Pagamento pagamento) {
 
@@ -103,19 +112,13 @@ public class PagamentoService {
                 "pending", retorno
         );
 
-        // Map mutável para permitir campos extras (statement_descriptor etc.)
         Map<String, Object> body = new HashMap<>();
         body.put("items", List.of(item));
         body.put("external_reference", pagamento.getId().toString());
         body.put("notification_url", notificationUrl);
         body.put("back_urls", backUrls);
         body.put("auto_return", "approved");
-
-        // aparece na fatura do cartão (evite acentos e caracteres especiais)
         body.put("statement_descriptor", "BARBEARIA ALVARO");
-
-        // opcional: deixar DESLIGADO por enquanto para não reduzir aprovações por "análise"
-        // body.put("binary_mode", true);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -146,13 +149,6 @@ public class PagamentoService {
         );
     }
 
-    /**
-     * Decide se retorna link de produção ou sandbox.
-     * Regra:
-     * 1) Se mp.sandbox=true => sandbox_init_point
-     * 2) Senão, se token aparenta ser de teste => sandbox_init_point
-     * 3) Caso contrário => init_point (produção)
-     */
     private String escolherCheckoutUrl(Map<String, Object> responseBody) {
 
         boolean tokenPareceTeste = mpToken != null && mpToken.startsWith("TEST-");
@@ -174,7 +170,7 @@ public class PagamentoService {
     }
 
     // =============================================================
-    // 3) PIX DIRECT (real)
+    // 3) PIX DIRECT
     // =============================================================
     private PagamentoCreateResponse criarPixDirect(Pagamento pagamento) {
 
@@ -184,13 +180,7 @@ public class PagamentoService {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(mpToken);
 
-        // MERCADO PAGO: obrigatório para /v1/payments (evita duplicidade em retries)
-        // Opção mais segura (determinística): usar o id do pagamento interno
-        // Assim, se o front repetir a request, o MP não cria outro pagamento duplicado.
         headers.add("X-Idempotency-Key", "pix-" + pagamento.getId());
-
-        // Se você preferir sempre "novo pagamento" ao repetir, use UUID:
-        // headers.add("X-Idempotency-Key", UUID.randomUUID().toString());
 
         String emailCliente = pagamento.getAgendamento().getCliente().getEmail();
         if (emailCliente == null || emailCliente.isBlank()) {
@@ -249,7 +239,7 @@ public class PagamentoService {
     }
 
     // =============================================================
-    // 4) PROCESSAR MERCHANT_ORDER (quando o webhook vier como merchant_order)
+    // 4) PROCESSAR MERCHANT_ORDER
     // =============================================================
     public void processarWebhook(Long merchantOrderId) {
 
@@ -265,13 +255,8 @@ public class PagamentoService {
         Map<String, Object> order = resp.getBody();
         if (order == null) return;
 
-        System.out.println("🔎 merchant_order=" + merchantOrderId + " body=" + order);
-
         List<Map<String, Object>> payments = (List<Map<String, Object>>) order.get("payments");
-        if (payments == null || payments.isEmpty()) {
-            System.out.println("⚠ merchant_order SEM payments ainda");
-            return;
-        }
+        if (payments == null || payments.isEmpty()) return;
 
         Long paymentId = Long.valueOf(payments.get(0).get("id").toString());
         processarPagamentoDireto(paymentId);
@@ -299,15 +284,9 @@ public class PagamentoService {
             Object externalRefObj = pay.get("external_reference");
             Object preferenceObj = pay.get("preference_id");
 
-            System.out.println("💳 MP paymentId=" + paymentId
-                    + " | status=" + status
-                    + " | external_reference=" + externalRefObj
-                    + " | preference_id=" + preferenceObj);
-
             if (externalRefObj != null) {
                 Long pagamentoIdInterno = Long.valueOf(externalRefObj.toString());
                 Pagamento pagamento = pagamentoRepo.findById(pagamentoIdInterno).orElse(null);
-
                 if (pagamento != null) {
                     atualizarStatusPagamento(pagamento, status);
                     return;
@@ -317,11 +296,8 @@ public class PagamentoService {
             if (preferenceObj != null) {
                 String preferenceId = preferenceObj.toString();
                 Pagamento pagamento = pagamentoRepo.findByGatewayId(preferenceId);
-
                 if (pagamento != null) {
                     atualizarStatusPagamento(pagamento, status);
-                } else {
-                    System.out.println("⚠ Não achei pagamento por preference_id=" + preferenceId);
                 }
                 return;
             }
@@ -329,8 +305,6 @@ public class PagamentoService {
             Pagamento pagamento = pagamentoRepo.findByGatewayId(paymentId.toString());
             if (pagamento != null) {
                 atualizarStatusPagamento(pagamento, status);
-            } else {
-                System.out.println("⚠ Não achei pagamento por gatewayId(paymentId)=" + paymentId);
             }
 
         } catch (HttpClientErrorException.NotFound e) {
@@ -342,9 +316,10 @@ public class PagamentoService {
     }
 
     // =============================================================
-    // 6) Atualizar status interno
+    // 6) Atualizar status interno + confirmar agendamento se dentro do prazo
     // =============================================================
-    private void atualizarStatusPagamento(Pagamento pagamento, String mpStatus) {
+    @Transactional
+    protected void atualizarStatusPagamento(Pagamento pagamento, String mpStatus) {
 
         StatusPagamento novoStatus = switch (mpStatus.toLowerCase()) {
             case "approved", "authorized" -> StatusPagamento.PAGO;
@@ -354,18 +329,55 @@ public class PagamentoService {
             default -> StatusPagamento.PENDENTE;
         };
 
+        // Se já expirou internamente, não “revive” (evita confirmar fora do prazo)
+        if (pagamento.getStatus() == StatusPagamento.EXPIRADO) {
+            System.out.println("⚠ Pagamento já estava EXPIRADO internamente. Ignorando atualização para " + novoStatus);
+            return;
+        }
+
         pagamento.setStatus(novoStatus);
-        pagamento.setCriadoEm(LocalDateTime.now()); // se quiser, crie recebidoEm separado
         pagamentoRepo.save(pagamento);
 
-        System.out.println("✅ Pagamento atualizado | id=" + pagamento.getId()
-                + " | status=" + pagamento.getStatus());
-
         if (novoStatus == StatusPagamento.PAGO) {
-            Agendamento ag = pagamento.getAgendamento();
-            ag.setPago(true);
-            agendamentoRepo.save(ag);
-            System.out.println("✅ AGENDAMENTO MARCADO COMO PAGO! agendamentoId=" + ag.getId());
+            confirmarAgendamentoSeDentroDoPrazo(pagamento);
+        }
+    }
+
+    private void confirmarAgendamentoSeDentroDoPrazo(Pagamento pagamento) {
+        Agendamento ag = pagamento.getAgendamento();
+
+        // Se já cancelou por expiração, não confirma
+        if (ag.getStatus() == StatusAgendamento.CANCELADO) {
+            System.out.println("⚠ Pagamento aprovado, mas agendamento já está CANCELADO (provável expiração).");
+            return;
+        }
+
+        // Se tinha expiração e passou, não confirma (evita “pago atrasado” confirmar)
+        LocalDateTime expAg = ag.getExpiraEm();
+        if (expAg != null && LocalDateTime.now().isAfter(expAg)) {
+            System.out.println("⚠ Pagamento aprovado fora do prazo. Mantendo agendamento como está.");
+            return;
+        }
+
+        ag.setPago(true);
+
+        if (ag.getStatus() == StatusAgendamento.PAGAMENTO_PENDENTE) {
+            ag.setStatus(StatusAgendamento.AGENDADO);
+            ag.setExpiraEm(null);
+        }
+
+        agendamentoRepo.save(ag);
+
+        // WhatsApp de confirmação (só quando efetivamente confirmou)
+        try {
+            var cliente = ag.getCliente();
+            String mensagem = "Olá " + cliente.getNome() +
+                    "! Seu horário na Barbearia Álvaro Santos foi confirmado para " +
+                    ag.getData() + " às " + ag.getHorarioInicio() + " ✂️";
+            wahaClient.sendText(cliente.getTelefone(), mensagem);
+        } catch (Exception e) {
+            System.err.println("Erro ao enviar WhatsApp de confirmação pós-pagamento:");
+            e.printStackTrace();
         }
     }
 
@@ -408,27 +420,6 @@ public class PagamentoService {
         }
 
         pagamento.setStatus(StatusPagamento.CANCELADO);
-        pagamentoRepo.save(pagamento);
-
-        return pagamento;
-    }
-
-    // =============================================================
-    // 11) CONFIRMAR MANUALMENTE
-    // =============================================================
-    public Pagamento confirmarManual(Long id) {
-        Pagamento pagamento = buscarPorId(id);
-
-        if (pagamento.getStatus() == StatusPagamento.PAGO) {
-            return pagamento;
-        }
-
-        pagamento.setStatus(StatusPagamento.PAGO);
-
-        Agendamento ag = pagamento.getAgendamento();
-        ag.setPago(true);
-        agendamentoRepo.save(ag);
-
         pagamentoRepo.save(pagamento);
 
         return pagamento;
