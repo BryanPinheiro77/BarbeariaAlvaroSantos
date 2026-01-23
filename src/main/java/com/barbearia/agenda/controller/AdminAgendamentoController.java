@@ -9,7 +9,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.stream.Stream;
 
 @RestController
 @RequestMapping("/admin/agendamentos")
@@ -22,7 +21,7 @@ public class AdminAgendamentoController {
     }
 
     // ==========================================================
-    // 1️⃣ LISTAR / FILTRAR AGENDAMENTOS (ADMIN) — COMBINA FILTROS
+    // 1️⃣ LISTAR / FILTRAR AGENDAMENTOS (ADMIN)
     // ==========================================================
     @GetMapping
     public ResponseEntity<List<AgendamentoResponse>> listar(
@@ -32,45 +31,40 @@ public class AdminAgendamentoController {
             @RequestParam(required = false) String inicio,
             @RequestParam(required = false) String fim
     ) {
-        // Base: decide um conjunto inicial (preferência: intervalo > dia específico > tudo)
-        List<Agendamento> base;
+
+        List<Agendamento> agendamentos;
 
         if (inicio != null && fim != null) {
-            base = agendamentoRepo.findByDataBetween(LocalDate.parse(inicio), LocalDate.parse(fim));
+            agendamentos = agendamentoRepo.findByDataBetween(
+                    LocalDate.parse(inicio),
+                    LocalDate.parse(fim)
+            );
+
+        } else if (clienteId != null) {
+            agendamentos = agendamentoRepo.findByClienteId(clienteId);
+
         } else if (data != null) {
-            base = agendamentoRepo.findByData(LocalDate.parse(data));
+            agendamentos = agendamentoRepo.findByData(LocalDate.parse(data));
+
+        } else if (status != null) {
+            agendamentos = agendamentoRepo.findByStatus(
+                    StatusAgendamento.valueOf(status.toUpperCase())
+            );
+
         } else {
-            base = agendamentoRepo.findAll();
+            agendamentos = agendamentoRepo.findAll();
         }
 
-        Stream<Agendamento> st = base.stream();
-
-        // Refina por cliente (se vier)
-        if (clienteId != null) {
-            st = st.filter(a -> a.getCliente() != null && clienteId.equals(a.getCliente().getId()));
-        }
-
-        // Refina por status (se vier)
-        if (status != null && !status.isBlank()) {
-            StatusAgendamento stReq = StatusAgendamento.valueOf(status.toUpperCase());
-            st = st.filter(a -> a.getStatus() == stReq);
-        }
-
-        // Se o front mandar "data" junto, também refina (só pra ficar robusto)
-        if (data != null && !data.isBlank()) {
-            LocalDate d = LocalDate.parse(data);
-            st = st.filter(a -> d.equals(a.getData()));
-        }
-
-        List<AgendamentoResponse> resposta = st
-                .map(this::toResponse)
-                .toList();
+            List<AgendamentoResponse> resposta = agendamentos.stream()
+                    .map(this::toResponse)
+                    .toList();
 
         return ResponseEntity.ok(resposta);
     }
 
     // ==========================================================
     // 2️⃣ LISTAR AGENDAMENTOS POR CLIENTE (ADMIN)
+    // (opcional, mas útil para navegação direta)
     // ==========================================================
     @GetMapping("/cliente/{clienteId}")
     public ResponseEntity<List<AgendamentoResponse>> listarPorCliente(

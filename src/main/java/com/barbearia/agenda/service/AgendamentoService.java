@@ -16,8 +16,6 @@ import java.util.List;
 @Service
 public class AgendamentoService {
 
-    private static final int EXPIRACAO_MINUTOS = 15;
-
     private final WahaClient wahaClient;
     private final AgendamentoRepository agendamentoRepo;
     private final ClienteRepository clienteRepo;
@@ -49,11 +47,13 @@ public class AgendamentoService {
         Cliente cliente = clienteRepo.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Cliente não encontrado"));
 
+        // 1) Busca todos os serviços
         List<Servico> servicos = servicoRepo.findAllById(req.servicosIds());
         if (servicos.size() != req.servicosIds().size()) {
             throw new RuntimeException("Um ou mais serviços são inválidos");
         }
 
+        // 2) Soma duração total
         int duracaoTotal = servicos.stream()
                 .mapToInt(Servico::getDuracaoMinutos)
                 .sum();
@@ -61,6 +61,7 @@ public class AgendamentoService {
         LocalTime inicio = req.horarioInicio();
         LocalTime fim = inicio.plusMinutes(duracaoTotal);
 
+        // 3) Verifica conflito usando duração total (ignorando CANCELADO)
         boolean conflito = agendamentoRepo
                 .existsByDataAndStatusNotAndHorarioInicioLessThanAndHorarioFimGreaterThan(
                         req.data(),
@@ -73,6 +74,7 @@ public class AgendamentoService {
             throw new RuntimeException("Horário já reservado!");
         }
 
+        // 4) Cria agendamento
         Agendamento a = new Agendamento();
         a.setCliente(cliente);
         a.setData(req.data());
@@ -83,21 +85,13 @@ public class AgendamentoService {
         a.setFormaPagamentoModo(req.formaPagamentoModo());
         a.setLembreteMinutos(req.lembreteMinutos());
 
+        a.setStatus(StatusAgendamento.AGENDADO);
         a.setPago(false);
         a.setEnviadoConfirmacao(false);
         a.setEnviadoLembrete(false);
         a.setCriadoEm(LocalDateTime.now());
 
-        boolean online = "ONLINE".equalsIgnoreCase(req.formaPagamentoModo());
-
-        if (online) {
-            a.setStatus(StatusAgendamento.PAGAMENTO_PENDENTE);
-            a.setExpiraEm(LocalDateTime.now().plusMinutes(EXPIRACAO_MINUTOS));
-        } else {
-            a.setStatus(StatusAgendamento.AGENDADO);
-            a.setExpiraEm(null);
-        }
-
+        // 5) Cria vínculos AgendamentoServico (join table)
         for (Servico s : servicos) {
             AgendamentoServico link = new AgendamentoServico();
             link.setAgendamento(a);
@@ -105,26 +99,31 @@ public class AgendamentoService {
             a.getServicos().add(link);
         }
 
+        // 6) Salva no banco
         Agendamento salvo = agendamentoRepo.save(a);
 
-        // ✅ Só envia confirmação imediata se NÃO for online (porque online confirma após pagar)
-        if (!online) {
-            try {
-                String mensagem = "Olá " + cliente.getNome() +
-                        "! Seu horário na Barbearia Álvaro Santos foi confirmado para " +
-                        req.data() + " às " + req.horarioInicio() + " ✂️";
+        // 7) Envia WhatsApp após salvar (somente marca como enviado se realmente enviou)
+        try {
+            String mensagem = "Olá " + cliente.getNome() +
+                    "! Seu horário na Barbearia Álvaro Santos foi confirmado para " +
+                    req.data() + " às " + req.horarioInicio() + " ✂️";
 
-                boolean enviado = wahaClient.sendText(cliente.getTelefone(), mensagem);
-                if (enviado) {
-                    salvo.setEnviadoConfirmacao(true);
-                    agendamentoRepo.save(salvo);
-                }
-            } catch (Exception e) {
-                System.err.println("Erro ao enviar WhatsApp:");
-                e.printStackTrace();
+            boolean enviado = wahaClient.sendText(cliente.getTelefone(), mensagem);
+            if (enviado) {
+                salvo.setEnviadoConfirmacao(true);
+                agendamentoRepo.save(salvo);
+            } else {
+                System.err.println("WhatsApp NÃO enviado (WAHA retornou falha). Não marcando enviadoConfirmacao.");
             }
+
+
+        } catch (Exception e) {
+            System.err.println("Erro ao enviar WhatsApp:");
+            e.printStackTrace();
+            // Não interrompe o fluxo
         }
 
+        // 8) Retorna o agendamento salvo
         return salvo;
     }
 
@@ -156,9 +155,13 @@ public class AgendamentoService {
             throw new RuntimeException("Não é possível cancelar um agendamento pago");
         }
 
+        // 1) Cancela o agendamento
         ag.setStatus(StatusAgendamento.CANCELADO);
+
+        // 2) Salva no banco
         Agendamento salvo = agendamentoRepo.save(ag);
 
+        // 3) Envia mensagem via WhatsApp
         try {
             String mensagem = "❌ Agendamento cancelado\n\n" +
                     "Olá, " + cliente.getNome() + "!\n" +
@@ -168,10 +171,13 @@ public class AgendamentoService {
                     "Se precisar, é só agendar novamente 💈";
 
             wahaClient.sendText(cliente.getTelefone(), mensagem);
+
         } catch (Exception e) {
             System.err.println("Erro ao enviar WhatsApp de cancelamento: " + e.getMessage());
+            // não quebra o cancelamento
         }
 
         return salvo;
     }
+
 }
