@@ -155,7 +155,27 @@ public class AgendamentoService {
             throw new RuntimeException("Não é possível cancelar um agendamento pago");
         }
 
+        // 1) Cancela o agendamento
         ag.setStatus(StatusAgendamento.CANCELADO);
-        return agendamentoRepo.save(ag);
+
+        // 2) Salva no banco
+        Agendamento salvo = agendamentoRepo.save(ag);
+
+        // 3) Envia mensagem via WhatsApp
+        try {
+            String mensagem = "❌ Agendamento cancelado\n\n" +
+                    "Olá, " + cliente.getNome() + "!\n" +
+                    "Seu agendamento foi cancelado com sucesso.\n\n" +
+                    "📅 Data: " + ag.getData() + "\n" +
+                    "⏰ Horário: " + ag.getHorarioInicio() + "\n\n" +
+                    "Se precisar, é só agendar novamente 💈";
+
+            wahaClient.sendText(cliente.getTelefone(), mensagem);
+
+        } catch (Exception e) {
+            System.err.println("Erro ao enviar WhatsApp de cancelamento: " + e.getMessage());
+            // não quebra o cancelamento
+        }
+
+        return salvo;
     }
-}
