@@ -10,7 +10,6 @@ import com.barbearia.agenda.model.StatusPagamento;
 import com.barbearia.agenda.model.TipoPagamentoStrategy;
 import com.barbearia.agenda.repository.AgendamentoRepository;
 import com.barbearia.agenda.repository.PagamentoRepository;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -68,7 +67,6 @@ public class PagamentoService {
             throw new RuntimeException("Agendamento não possui serviços para calcular o total.");
         }
 
-        // Se já expirou/cancelou, não gera pagamento
         if (agendamento.getStatus() == StatusAgendamento.CANCELADO) {
             throw new RuntimeException("Agendamento cancelado. Não é possível gerar pagamento.");
         }
@@ -150,21 +148,20 @@ public class PagamentoService {
     }
 
     private String escolherCheckoutUrl(Map<String, Object> responseBody) {
-
         boolean tokenPareceTeste = mpToken != null && mpToken.startsWith("TEST-");
         boolean usarSandbox = mpSandbox || tokenPareceTeste;
 
         if (usarSandbox) {
             Object sandbox = responseBody.get("sandbox_init_point");
             if (sandbox == null) {
-                throw new RuntimeException("Preferência retornou sem sandbox_init_point, mas o ambiente está em sandbox.");
+                throw new RuntimeException("Preferência sem sandbox_init_point, mas ambiente está em sandbox.");
             }
             return String.valueOf(sandbox);
         }
 
         Object initPoint = responseBody.get("init_point");
         if (initPoint == null) {
-            throw new RuntimeException("Preferência retornou sem init_point (produção).");
+            throw new RuntimeException("Preferência sem init_point (produção).");
         }
         return String.valueOf(initPoint);
     }
@@ -180,6 +177,7 @@ public class PagamentoService {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(mpToken);
 
+        // idempotência
         headers.add("X-Idempotency-Key", "pix-" + pagamento.getId());
 
         String emailCliente = pagamento.getAgendamento().getCliente().getEmail();
@@ -218,7 +216,7 @@ public class PagamentoService {
             Map<String, Object> txData = poi == null ? null : (Map<String, Object>) poi.get("transaction_data");
 
             if (txData == null) {
-                throw new RuntimeException("Pagamento PIX criado, mas sem transaction_data (QR). Resposta: " + payment);
+                throw new RuntimeException("PIX criado, mas sem transaction_data (QR). Resposta: " + payment);
             }
 
             String qrBase64 = String.valueOf(txData.get("qr_code_base64"));
@@ -329,9 +327,9 @@ public class PagamentoService {
             default -> StatusPagamento.PENDENTE;
         };
 
-        // Se já expirou internamente, não “revive” (evita confirmar fora do prazo)
+        // não revive pagamento expirado
         if (pagamento.getStatus() == StatusPagamento.EXPIRADO) {
-            System.out.println("⚠ Pagamento já estava EXPIRADO internamente. Ignorando atualização para " + novoStatus);
+            System.out.println("⚠ Pagamento EXPIRADO internamente. Ignorando update para " + novoStatus);
             return;
         }
 
@@ -345,14 +343,13 @@ public class PagamentoService {
 
     private void confirmarAgendamentoSeDentroDoPrazo(Pagamento pagamento) {
         Agendamento ag = pagamento.getAgendamento();
+        if (ag == null) return;
 
-        // Se já cancelou por expiração, não confirma
         if (ag.getStatus() == StatusAgendamento.CANCELADO) {
-            System.out.println("⚠ Pagamento aprovado, mas agendamento já está CANCELADO (provável expiração).");
+            System.out.println("⚠ Pagamento aprovado, mas agendamento já está CANCELADO.");
             return;
         }
 
-        // Se tinha expiração e passou, não confirma (evita “pago atrasado” confirmar)
         LocalDateTime expAg = ag.getExpiraEm();
         if (expAg != null && LocalDateTime.now().isAfter(expAg)) {
             System.out.println("⚠ Pagamento aprovado fora do prazo. Mantendo agendamento como está.");
@@ -368,7 +365,7 @@ public class PagamentoService {
 
         agendamentoRepo.save(ag);
 
-        // WhatsApp de confirmação (só quando efetivamente confirmou)
+        // WhatsApp pós-confirmação
         try {
             var cliente = ag.getCliente();
             String mensagem = "Olá " + cliente.getNome() +
@@ -393,11 +390,9 @@ public class PagamentoService {
     // 8) LISTAR POR STATUS
     // =============================================================
     public List<Pagamento> listarPorStatus(String status) {
-
         if (status == null || status.isBlank()) {
             return pagamentoRepo.findAll();
         }
-
         StatusPagamento st = StatusPagamento.valueOf(status.toUpperCase());
         return pagamentoRepo.findByStatus(st);
     }
@@ -412,6 +407,7 @@ public class PagamentoService {
     // =============================================================
     // 10) CANCELAR MANUALMENTE
     // =============================================================
+    @Transactional
     public Pagamento cancelar(Long id) {
         Pagamento pagamento = buscarPorId(id);
 
@@ -421,6 +417,30 @@ public class PagamentoService {
 
         pagamento.setStatus(StatusPagamento.CANCELADO);
         pagamentoRepo.save(pagamento);
+
+        return pagamento;
+    }
+
+    // =============================================================
+    // 11) CONFIRMAR MANUALMENTE (ADMIN)  ✅ VOLTOU
+    // =============================================================
+    @Transactional
+    public Pagamento confirmarManual(Long id) {
+        Pagamento pagamento = buscarPorId(id);
+
+        if (pagamento.getStatus() == StatusPagamento.EXPIRADO) {
+            throw new RuntimeException("Pagamento expirado. Gere um novo pagamento.");
+        }
+
+        if (pagamento.getStatus() == StatusPagamento.PAGO) {
+            return pagamento;
+        }
+
+        pagamento.setStatus(StatusPagamento.PAGO);
+        pagamentoRepo.save(pagamento);
+
+        // aplica mesma regra de confirmação de agendamento
+        confirmarAgendamentoSeDentroDoPrazo(pagamento);
 
         return pagamento;
     }
