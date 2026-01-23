@@ -4,6 +4,7 @@ import com.barbearia.agenda.dto.AgendamentoResponse;
 import com.barbearia.agenda.model.Agendamento;
 import com.barbearia.agenda.model.StatusAgendamento;
 import com.barbearia.agenda.repository.AgendamentoRepository;
+import com.barbearia.agenda.service.AgendamentoService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,9 +16,14 @@ import java.util.List;
 public class AdminAgendamentoController {
 
     private final AgendamentoRepository agendamentoRepo;
+    private final AgendamentoService agendamentoService;
 
-    public AdminAgendamentoController(AgendamentoRepository agendamentoRepo) {
+    public AdminAgendamentoController(
+            AgendamentoRepository agendamentoRepo,
+            AgendamentoService agendamentoService
+    ) {
         this.agendamentoRepo = agendamentoRepo;
+        this.agendamentoService = agendamentoService;
     }
 
     // ==========================================================
@@ -55,16 +61,15 @@ public class AdminAgendamentoController {
             agendamentos = agendamentoRepo.findAll();
         }
 
-            List<AgendamentoResponse> resposta = agendamentos.stream()
-                    .map(this::toResponse)
-                    .toList();
+        List<AgendamentoResponse> resposta = agendamentos.stream()
+                .map(this::toResponse)
+                .toList();
 
         return ResponseEntity.ok(resposta);
     }
 
     // ==========================================================
     // 2️⃣ LISTAR AGENDAMENTOS POR CLIENTE (ADMIN)
-    // (opcional, mas útil para navegação direta)
     // ==========================================================
     @GetMapping("/cliente/{clienteId}")
     public ResponseEntity<List<AgendamentoResponse>> listarPorCliente(
@@ -115,25 +120,15 @@ public class AdminAgendamentoController {
     }
 
     // ==========================================================
-    // 4️⃣ CANCELAR AGENDAMENTO (ADMIN)
+    // 4️⃣ CANCELAR AGENDAMENTO (ADMIN / BARBEIRO)
+    // 👉 envia WhatsApp automaticamente pro cliente
     // ==========================================================
     @PatchMapping("/{id}/cancelar")
     public ResponseEntity<?> cancelar(@PathVariable Long id) {
 
-        return agendamentoRepo.findById(id)
-                .map(a -> {
-                    if (a.getStatus() == StatusAgendamento.CONCLUIDO) {
-                        return ResponseEntity
-                                .badRequest()
-                                .body("Agendamento concluído não pode ser cancelado");
-                    }
+        agendamentoService.cancelarBarbeiro(id);
 
-                    a.setStatus(StatusAgendamento.CANCELADO);
-                    agendamentoRepo.save(a);
-
-                    return ResponseEntity.noContent().build();
-                })
-                .orElse(ResponseEntity.notFound().build());
+        return ResponseEntity.noContent().build();
     }
 
     // ==========================================================
