@@ -141,43 +141,73 @@ public class AgendamentoService {
 
     @Transactional
     public Agendamento cancelarCliente(Long agendamentoId, String email) {
+        if (email == null || email.isBlank()) {
+            throw new RuntimeException("Usuário autenticado inválido");
+        }
+
         Cliente cliente = clienteRepo.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Cliente não encontrado"));
 
         Agendamento ag = agendamentoRepo.findById(agendamentoId)
                 .orElseThrow(() -> new RuntimeException("Agendamento não encontrado"));
 
+        // dono do agendamento
         if (!ag.getCliente().getId().equals(cliente.getId())) {
             throw new RuntimeException("Você não pode cancelar este agendamento");
         }
 
-        if (ag.isPago()) {
-            throw new RuntimeException("Não é possível cancelar um agendamento pago");
+        // status
+        if (ag.getStatus() == StatusAgendamento.CANCELADO) {
+            return ag; // idempotente
+        }
+        if (ag.getStatus() == StatusAgendamento.CONCLUIDO) {
+            throw new RuntimeException("Agendamento concluído não pode ser cancelado");
+        }
+        if (ag.getStatus() != StatusAgendamento.AGENDADO) {
+            throw new RuntimeException("Só é possível cancelar agendamentos com status AGENDADO");
         }
 
-        // 1) Cancela o agendamento
-        ag.setStatus(StatusAgendamento.CANCELADO);
+        // ✅ regra do cliente: só cancela até 2h antes
+        LocalDateTime inicioAg = LocalDateTime.of(ag.getData(), ag.getHorarioInicio());
+        LocalDateTime agora = LocalDateTime.now();
 
-        // 2) Salva no banco
+        long minutosAte = java.time.Duration.between(agora, inicioAg).toMinutes();
+        if (minutosAte < 120) {
+            throw new RuntimeException("Cancelamento permitido apenas até 2 horas antes do horário");
+        }
+
+        // cancela
+        ag.setStatus(StatusAgendamento.CANCELADO);
         Agendamento salvo = agendamentoRepo.save(ag);
 
-        // 3) Envia mensagem via WhatsApp
+        // WhatsApp
         try {
-            String mensagem = "❌ Agendamento cancelado\n\n" +
-                    "Olá, " + cliente.getNome() + "!\n" +
-                    "Seu agendamento foi cancelado com sucesso.\n\n" +
-                    "📅 Data: " + ag.getData() + "\n" +
-                    "⏰ Horário: " + ag.getHorarioInicio() + "\n\n" +
-                    "Se precisar, é só agendar novamente 💈";
+            String mensagem;
+
+            if (ag.isPago()) {
+                mensagem = "❌ Agendamento cancelado\n\n" +
+                        "Olá, " + cliente.getNome() + "!\n" +
+                        "Seu agendamento foi cancelado com sucesso.\n\n" +
+                        "📅 Data: " + ag.getData() + "\n" +
+                        "⏰ Horário: " + ag.getHorarioInicio() + "\n\n" +
+                        "💳 Observação: seu agendamento estava pago.\n" +
+                        "Entre em contato com o barbeiro para tratar o reembolso. 💈";
+            } else {
+                mensagem = "❌ Agendamento cancelado\n\n" +
+                        "Olá, " + cliente.getNome() + "!\n" +
+                        "Seu agendamento foi cancelado com sucesso.\n\n" +
+                        "📅 Data: " + ag.getData() + "\n" +
+                        "⏰ Horário: " + ag.getHorarioInicio() + "\n\n" +
+                        "Se precisar, é só agendar novamente 💈";
+            }
 
             wahaClient.sendText(cliente.getTelefone(), mensagem);
-
         } catch (Exception e) {
             System.err.println("Erro ao enviar WhatsApp de cancelamento: " + e.getMessage());
-            // não quebra o cancelamento
         }
 
         return salvo;
     }
+
 
 }
