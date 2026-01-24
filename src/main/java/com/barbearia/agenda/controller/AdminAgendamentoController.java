@@ -1,9 +1,11 @@
 package com.barbearia.agenda.controller;
 
 import com.barbearia.agenda.dto.AgendamentoResponse;
+import com.barbearia.agenda.dto.AdminAgendamentoCreateRequest;
 import com.barbearia.agenda.model.Agendamento;
 import com.barbearia.agenda.model.StatusAgendamento;
 import com.barbearia.agenda.repository.AgendamentoRepository;
+import com.barbearia.agenda.service.AgendamentoService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,9 +17,25 @@ import java.util.List;
 public class AdminAgendamentoController {
 
     private final AgendamentoRepository agendamentoRepo;
+    private final AgendamentoService agendamentoService;
 
-    public AdminAgendamentoController(AgendamentoRepository agendamentoRepo) {
+    public AdminAgendamentoController(
+            AgendamentoRepository agendamentoRepo,
+            AgendamentoService agendamentoService
+    ) {
         this.agendamentoRepo = agendamentoRepo;
+        this.agendamentoService = agendamentoService;
+    }
+
+    // ==========================================================
+    // 0️⃣ CRIAR AGENDAMENTO (ADMIN)
+    // - permite escolher cliente cadastrado OU criar "na hora"
+    //   (via DTO próprio / lógica no service)
+    // ==========================================================
+    @PostMapping
+    public ResponseEntity<AgendamentoResponse> criar(@RequestBody AdminAgendamentoCreateRequest req) {
+        Agendamento a = agendamentoService.criarAdmin(req);
+        return ResponseEntity.ok(toResponse(a));
     }
 
     // ==========================================================
@@ -32,7 +50,6 @@ public class AdminAgendamentoController {
             @RequestParam(required = false) String fim
     ) {
 
-        // Normaliza status (se vier vazio, trata como null)
         StatusAgendamento st = null;
         if (status != null && !status.isBlank()) {
             st = StatusAgendamento.valueOf(status.toUpperCase());
@@ -40,7 +57,7 @@ public class AdminAgendamentoController {
 
         List<Agendamento> agendamentos;
 
-        // 1) Período (inicio/fim) tem prioridade, mas agora combina com status/cliente
+        // 1) Período (inicio/fim) tem prioridade e combina com status/cliente
         if (inicio != null && fim != null && !inicio.isBlank() && !fim.isBlank()) {
             LocalDate ini = LocalDate.parse(inicio);
             LocalDate end = LocalDate.parse(fim);
@@ -55,7 +72,7 @@ public class AdminAgendamentoController {
                 agendamentos = agendamentoRepo.findByDataBetween(ini, end);
             }
 
-            // 2) Data única (se vier)
+            // 2) Data única
         } else if (data != null && !data.isBlank()) {
             LocalDate d = LocalDate.parse(data);
 
@@ -93,9 +110,7 @@ public class AdminAgendamentoController {
     // 2️⃣ LISTAR AGENDAMENTOS POR CLIENTE (ADMIN)
     // ==========================================================
     @GetMapping("/cliente/{clienteId}")
-    public ResponseEntity<List<AgendamentoResponse>> listarPorCliente(
-            @PathVariable Long clienteId
-    ) {
+    public ResponseEntity<List<AgendamentoResponse>> listarPorCliente(@PathVariable Long clienteId) {
 
         List<AgendamentoResponse> lista = agendamentoRepo
                 .findByClienteId(clienteId)
@@ -119,7 +134,7 @@ public class AdminAgendamentoController {
                                 .body("Agendamento cancelado não pode ser concluído");
                     }
 
-                    // ✅ regra do pagamento
+                    // Regra do pagamento
                     String modo = a.getFormaPagamentoModo(); // ONLINE ou PAGAR_NA_HORA
 
                     if (!a.isPago()) {
@@ -127,7 +142,6 @@ public class AdminAgendamentoController {
                             return ResponseEntity.badRequest()
                                     .body("Pagamento online ainda não foi confirmado");
                         }
-
                         // PAGAR_NA_HORA: concluiu => pagou
                         a.setPago(true);
                     }
@@ -142,6 +156,7 @@ public class AdminAgendamentoController {
 
     // ==========================================================
     // 4️⃣ CANCELAR AGENDAMENTO (ADMIN)
+    // - Admin cancela independente do tempo (a regra de 2h é só no cliente)
     // ==========================================================
     @PatchMapping("/{id}/cancelar")
     public ResponseEntity<?> cancelar(@PathVariable Long id) {
