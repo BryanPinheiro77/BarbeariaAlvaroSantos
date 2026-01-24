@@ -3,7 +3,11 @@ package com.barbearia.agenda.service;
 import com.barbearia.agenda.dto.AgendamentoCreateRequest;
 import com.barbearia.agenda.dto.AdminAgendamentoCreateRequest;
 import com.barbearia.agenda.integration.WahaClient;
-import com.barbearia.agenda.model.*;
+import com.barbearia.agenda.model.Agendamento;
+import com.barbearia.agenda.model.AgendamentoServico;
+import com.barbearia.agenda.model.Cliente;
+import com.barbearia.agenda.model.Servico;
+import com.barbearia.agenda.model.StatusAgendamento;
 import com.barbearia.agenda.repository.AgendamentoRepository;
 import com.barbearia.agenda.repository.ClienteRepository;
 import com.barbearia.agenda.repository.ServicoRepository;
@@ -13,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -37,7 +40,7 @@ public class AgendamentoService {
     }
 
     // ==========================================================
-    // CLIENTE (APP) - já existia
+    // CLIENTE (APP)
     // ==========================================================
     @Transactional
     public Agendamento criar(AgendamentoCreateRequest req, String email) {
@@ -79,16 +82,31 @@ public class AgendamentoService {
 
         Agendamento salvo = agendamentoRepo.save(a);
 
-        // WhatsApp (se tiver telefone)
-        tentarEnviarConfirmacaoWhatsApp(salvo, "Olá " + cliente.getNome()
-                + "! Seu horário na Barbearia Álvaro Santos foi confirmado para "
-                + req.data() + " às " + req.horarioInicio() + " ✂️");
+        // ✅ WhatsApp confirmação (SEM salvar no banco)
+        try {
+            String tel = cliente.getTelefone();
+            if (tel != null && !tel.isBlank()) {
+                String mensagem = "Olá " + cliente.getNome()
+                        + "! Seu horário na Barbearia Álvaro Santos foi confirmado para "
+                        + req.data() + " às " + req.horarioInicio() + " ✂️";
+
+                boolean enviado = wahaClient.sendText(tel, mensagem);
+
+                if (!enviado) {
+                    System.err.println("WhatsApp não enviado (WAHA retornou false)");
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Erro ao enviar WhatsApp de confirmação:");
+            e.printStackTrace();
+        }
 
         return salvo;
     }
 
     @Transactional(readOnly = true)
     public List<Agendamento> listarMeus(String email) {
+
         if (email == null || email.isBlank()) {
             throw new RuntimeException("Usuário autenticado inválido");
         }
@@ -99,8 +117,12 @@ public class AgendamentoService {
         return agendamentoRepo.findByClienteId(cliente.getId());
     }
 
+    // ==========================================================
+    // CANCELAMENTO PELO CLIENTE (regra: até 2h antes)
+    // ==========================================================
     @Transactional
     public Agendamento cancelarCliente(Long agendamentoId, String email) {
+
         if (email == null || email.isBlank()) {
             throw new RuntimeException("Usuário autenticado inválido");
         }
@@ -116,9 +138,11 @@ public class AgendamentoService {
         }
 
         if (ag.getStatus() == StatusAgendamento.CANCELADO) return ag;
+
         if (ag.getStatus() == StatusAgendamento.CONCLUIDO) {
             throw new RuntimeException("Agendamento concluído não pode ser cancelado");
         }
+
         if (ag.getStatus() != StatusAgendamento.AGENDADO) {
             throw new RuntimeException("Só é possível cancelar agendamentos com status AGENDADO");
         }
@@ -134,30 +158,33 @@ public class AgendamentoService {
         ag.setStatus(StatusAgendamento.CANCELADO);
         Agendamento salvo = agendamentoRepo.save(ag);
 
+        // ✅ WhatsApp cancelamento (SEM salvar no banco)
         try {
-            String mensagem;
-            if (ag.isPago()) {
-                mensagem = "❌ Agendamento cancelado\n\n" +
-                        "Olá, " + cliente.getNome() + "!\n" +
-                        "Seu agendamento foi cancelado com sucesso.\n\n" +
-                        "📅 Data: " + ag.getData() + "\n" +
-                        "⏰ Horário: " + ag.getHorarioInicio() + "\n\n" +
-                        "💳 Observação: seu agendamento estava pago.\n" +
-                        "Entre em contato com o barbeiro para tratar o reembolso. 💈";
-            } else {
-                mensagem = "❌ Agendamento cancelado\n\n" +
-                        "Olá, " + cliente.getNome() + "!\n" +
-                        "Seu agendamento foi cancelado com sucesso.\n\n" +
-                        "📅 Data: " + ag.getData() + "\n" +
-                        "⏰ Horário: " + ag.getHorarioInicio() + "\n\n" +
-                        "Se precisar, é só agendar novamente 💈";
-            }
+            String tel = cliente.getTelefone();
+            if (tel != null && !tel.isBlank()) {
 
-            if (cliente.getTelefone() != null && !cliente.getTelefone().isBlank()) {
-                wahaClient.sendText(cliente.getTelefone(), mensagem);
+                String mensagem;
+                if (ag.isPago()) {
+                    mensagem = "❌ Agendamento cancelado\n\n" +
+                            "Olá, " + cliente.getNome() + "!\n" +
+                            "Seu agendamento foi cancelado com sucesso.\n\n" +
+                            "📅 Data: " + ag.getData() + "\n" +
+                            "⏰ Horário: " + ag.getHorarioInicio() + "\n\n" +
+                            "💳 Observação: seu agendamento estava pago.\n" +
+                            "Entre em contato com o barbeiro para tratar o reembolso. 💈";
+                } else {
+                    mensagem = "❌ Agendamento cancelado\n\n" +
+                            "Olá, " + cliente.getNome() + "!\n" +
+                            "Seu agendamento foi cancelado com sucesso.\n\n" +
+                            "📅 Data: " + ag.getData() + "\n" +
+                            "⏰ Horário: " + ag.getHorarioInicio() + "\n\n" +
+                            "Se precisar, é só agendar novamente 💈";
+                }
+
+                wahaClient.sendText(tel, mensagem);
             }
         } catch (Exception e) {
-            System.err.println("Erro ao enviar WhatsApp de cancelamento: " + e.getMessage());
+            System.err.println("Erro WhatsApp cancelamento cliente: " + e.getMessage());
         }
 
         return salvo;
@@ -165,18 +192,12 @@ public class AgendamentoService {
 
     // ==========================================================
     // ADMIN / BARBEIRO - criar agendamento
-    // Regras:
-    // - precisa do NOME
-    // - se existir cadastro, usa o Cliente cadastrado
-    // - se não existir, cria um Cliente "na hora" (somente com nome; telefone opcional)
-    // - admin decide se já está pago
     // ==========================================================
     @Transactional
     public Agendamento criarAdmin(AdminAgendamentoCreateRequest req) {
 
         if (req == null) throw new RuntimeException("Payload inválido");
 
-        // nome obrigatório (mesmo se vier clienteId)
         String nomeReq = req.clienteNome();
         if ((nomeReq == null || nomeReq.isBlank()) && req.clienteId() == null) {
             throw new RuntimeException("Informe o nome do cliente");
@@ -206,7 +227,7 @@ public class AgendamentoService {
         a.setFormaPagamentoTipo(req.formaPagamentoTipo());
         a.setFormaPagamentoModo(req.formaPagamentoModo());
 
-        // como o DTO do admin não tem lembrete, defina um padrão (ajuste como preferir)
+        // admin não escolhe lembrete: padrão
         a.setLembreteMinutos(60);
 
         a.setStatus(StatusAgendamento.AGENDADO);
@@ -222,12 +243,59 @@ public class AgendamentoService {
 
         Agendamento salvo = agendamentoRepo.save(a);
 
-        // WhatsApp: só tenta se tiver telefone (cadastrado ou informado)
-        // (se você quer SEMPRE exigir telefone no admin, valide antes)
-        String tel = cliente.getTelefone();
-        if (tel != null && !tel.isBlank()) {
-            String msg = montarMensagemConfirmacaoAdmin(salvo);
-            tentarEnviarConfirmacaoWhatsApp(salvo, msg);
+        // ✅ WhatsApp confirmação admin (SEM salvar no banco)
+        try {
+            String tel = cliente.getTelefone();
+            if (tel != null && !tel.isBlank()) {
+                String msg = montarMensagemConfirmacaoAdmin(salvo);
+                boolean enviado = wahaClient.sendText(tel, msg);
+
+                if (!enviado) {
+                    System.err.println("WhatsApp não enviado (WAHA retornou false)");
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Erro ao enviar WhatsApp (admin):");
+            e.printStackTrace();
+        }
+
+        return salvo;
+    }
+
+    // ==========================================================
+    // ADMIN / BARBEIRO - cancelar agendamento (mensagem para cliente)
+    // ==========================================================
+    @Transactional
+    public Agendamento cancelarBarbeiro(Long agendamentoId) {
+
+        Agendamento ag = agendamentoRepo.findById(agendamentoId)
+                .orElseThrow(() -> new RuntimeException("Agendamento não encontrado"));
+
+        if (ag.getStatus() == StatusAgendamento.CANCELADO) return ag;
+        if (ag.getStatus() == StatusAgendamento.CONCLUIDO) {
+            throw new RuntimeException("Agendamento concluído não pode ser cancelado");
+        }
+
+        ag.setStatus(StatusAgendamento.CANCELADO);
+        Agendamento salvo = agendamentoRepo.save(ag);
+
+        // ✅ WhatsApp cancelamento barbeiro (SEM salvar no banco)
+        try {
+            Cliente c = ag.getCliente();
+            String tel = (c != null ? c.getTelefone() : null);
+
+            if (tel != null && !tel.isBlank()) {
+                String mensagem = "❌ Agendamento cancelado pela barbearia\n\n" +
+                        "Olá, " + (c != null ? c.getNome() : "cliente") + "!\n" +
+                        "Infelizmente seu agendamento foi cancelado pela barbearia.\n\n" +
+                        "📅 Data: " + ag.getData() + "\n" +
+                        "⏰ Horário: " + ag.getHorarioInicio() + "\n\n" +
+                        "Você pode reagendar pelo sistema a qualquer momento 💈";
+
+                wahaClient.sendText(tel, mensagem);
+            }
+        } catch (Exception e) {
+            System.err.println("Erro WhatsApp cancelamento barbeiro: " + e.getMessage());
         }
 
         return salvo;
@@ -289,51 +357,36 @@ public class AgendamentoService {
      * 2) Senão, tenta achar por telefone (se vier).
      * 3) Senão, tenta achar por nome (primeiro match).
      * 4) Se não achou -> cria Cliente "na hora" com nome (telefone opcional).
-     *
-     * Observação importante:
-     * - Se no seu banco/entidade Cliente o telefone for NOT NULL/UNIQUE e você realmente quer permitir “só nome”,
-     *   ajuste a coluna/validação (ou então torne telefone obrigatório no admin).
      */
     private Cliente resolverClienteAdmin(AdminAgendamentoCreateRequest req) {
 
-        // 1) por id
         if (req.clienteId() != null) {
             return clienteRepo.findById(req.clienteId())
                     .orElseThrow(() -> new RuntimeException("ClienteId inválido"));
         }
 
-        // 2) por telefone (se existir no DTO)
         String telReq = req.clienteTelefone();
         if (telReq != null && !telReq.isBlank()) {
-            // precisa existir no seu ClienteRepository:
-            // Optional<Cliente> findByTelefone(String telefone);
             Optional<Cliente> porTelefone = clienteRepo.findByTelefone(telReq);
             if (porTelefone.isPresent()) return porTelefone.get();
         }
 
-        // 3) por nome
         String nomeReq = req.clienteNome();
         if (nomeReq != null && !nomeReq.isBlank()) {
-            // opções de repository:
-            // Optional<Cliente> findFirstByNomeIgnoreCase(String nome);
-            // List<Cliente> findByNomeContainingIgnoreCase(String nome);
             Optional<Cliente> porNome = clienteRepo.findFirstByNomeIgnoreCase(nomeReq.trim());
             if (porNome.isPresent()) return porNome.get();
         } else {
             throw new RuntimeException("Informe o nome do cliente");
         }
 
-        // 4) criar na hora
         Cliente novo = new Cliente();
         novo.setNome(nomeReq.trim());
 
-        // telefone opcional (se vier, salva)
         if (telReq != null && !telReq.isBlank()) {
             novo.setTelefone(telReq);
         }
 
-        // email não existe nesse fluxo
-        // (se sua entidade exigir email NOT NULL, você vai precisar ajustar a entidade ou criar um placeholder controlado)
+        // Se sua entidade permitir null, ok. Se não permitir, ajuste sua entidade/coluna.
         novo.setEmail(null);
 
         return clienteRepo.save(novo);
@@ -354,23 +407,5 @@ public class AgendamentoService {
                 "💳 " + pagoTxt + "\n" +
                 "Forma: " + tipo + " (" + modo + ")\n\n" +
                 "Se precisar alterar/cancelar, fale com a barbearia. 💈";
-    }
-
-    private void tentarEnviarConfirmacaoWhatsApp(Agendamento agendamento, String mensagem) {
-        try {
-            String tel = agendamento.getCliente() != null ? agendamento.getCliente().getTelefone() : null;
-            if (tel == null || tel.isBlank()) return;
-
-            boolean enviado = wahaClient.sendText(tel, mensagem);
-            if (enviado) {
-                agendamento.setEnviadoConfirmacao(true);
-                agendamentoRepo.save(agendamento);
-            } else {
-                System.err.println("WhatsApp NÃO enviado (WAHA retornou falha). Não marcando enviadoConfirmacao.");
-            }
-        } catch (Exception e) {
-            System.err.println("Erro ao enviar WhatsApp:");
-            e.printStackTrace();
-        }
     }
 }
