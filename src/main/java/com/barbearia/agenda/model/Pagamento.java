@@ -15,6 +15,8 @@ public class Pagamento {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    private LocalDateTime expiraEm; // ✅ pagamento expira
+
     // Relacionamento com Agendamento
     @ManyToOne
     @JoinColumn(name = "agendamento_id", nullable = false)

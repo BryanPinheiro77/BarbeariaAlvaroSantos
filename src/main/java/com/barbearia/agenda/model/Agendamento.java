@@ -15,6 +15,8 @@ public class Agendamento {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    private LocalDateTime expiraEm;
+
     // RELACIONAMENTOS
     @ManyToOne
     @JoinColumn(name = "cliente_id")

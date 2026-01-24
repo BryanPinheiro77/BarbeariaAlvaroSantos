@@ -4,6 +4,7 @@ import com.barbearia.agenda.model.Pagamento;
 import com.barbearia.agenda.model.StatusPagamento;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface PagamentoRepository extends JpaRepository<Pagamento, Long> {
@@ -12,5 +13,7 @@ public interface PagamentoRepository extends JpaRepository<Pagamento, Long> {
     List<Pagamento> findByStatus(StatusPagamento status);
 
     List<Pagamento> findByAgendamentoId(Long agendamentoId);
+
+    List<Pagamento> findByStatusAndExpiraEmBefore(StatusPagamento status, LocalDateTime now);
 
 }

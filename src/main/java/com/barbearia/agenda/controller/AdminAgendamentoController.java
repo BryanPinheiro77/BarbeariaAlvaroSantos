@@ -1,6 +1,7 @@
 package com.barbearia.agenda.controller;
 
 import com.barbearia.agenda.dto.AgendamentoResponse;
+import com.barbearia.agenda.dto.AdminAgendamentoCreateRequest;
 import com.barbearia.agenda.model.Agendamento;
 import com.barbearia.agenda.model.StatusAgendamento;
 import com.barbearia.agenda.repository.AgendamentoRepository;
@@ -27,6 +28,15 @@ public class AdminAgendamentoController {
     }
 
     // ==========================================================
+    // 0️⃣ CRIAR AGENDAMENTO (ADMIN)
+    // ==========================================================
+    @PostMapping
+    public ResponseEntity<AgendamentoResponse> criar(@RequestBody AdminAgendamentoCreateRequest req) {
+        Agendamento a = agendamentoService.criarAdmin(req);
+        return ResponseEntity.ok(toResponse(a));
+    }
+
+    // ==========================================================
     // 1️⃣ LISTAR / FILTRAR AGENDAMENTOS (ADMIN)
     // ==========================================================
     @GetMapping
@@ -38,25 +48,51 @@ public class AdminAgendamentoController {
             @RequestParam(required = false) String fim
     ) {
 
+        StatusAgendamento st = null;
+        if (status != null && !status.isBlank()) {
+            st = StatusAgendamento.valueOf(status.toUpperCase());
+        }
+
         List<Agendamento> agendamentos;
 
-        if (inicio != null && fim != null) {
-            agendamentos = agendamentoRepo.findByDataBetween(
-                    LocalDate.parse(inicio),
-                    LocalDate.parse(fim)
-            );
+        // 1) Período (inicio/fim) tem prioridade e combina com status/cliente
+        if (inicio != null && fim != null && !inicio.isBlank() && !fim.isBlank()) {
+            LocalDate ini = LocalDate.parse(inicio);
+            LocalDate end = LocalDate.parse(fim);
 
+            if (st != null && clienteId != null) {
+                agendamentos = agendamentoRepo.findByDataBetweenAndStatusAndClienteId(ini, end, st, clienteId);
+            } else if (st != null) {
+                agendamentos = agendamentoRepo.findByDataBetweenAndStatus(ini, end, st);
+            } else if (clienteId != null) {
+                agendamentos = agendamentoRepo.findByDataBetweenAndClienteId(ini, end, clienteId);
+            } else {
+                agendamentos = agendamentoRepo.findByDataBetween(ini, end);
+            }
+
+            // 2) Data única
+        } else if (data != null && !data.isBlank()) {
+            LocalDate d = LocalDate.parse(data);
+
+            if (st != null) {
+                agendamentos = agendamentoRepo.findByDataAndStatus(d, st);
+            } else {
+                agendamentos = agendamentoRepo.findByData(d);
+            }
+
+            // 3) Cliente (com possível status)
         } else if (clienteId != null) {
-            agendamentos = agendamentoRepo.findByClienteId(clienteId);
+            if (st != null) {
+                agendamentos = agendamentoRepo.findByClienteIdAndStatus(clienteId, st);
+            } else {
+                agendamentos = agendamentoRepo.findByClienteId(clienteId);
+            }
 
-        } else if (data != null) {
-            agendamentos = agendamentoRepo.findByData(LocalDate.parse(data));
+            // 4) Só status
+        } else if (st != null) {
+            agendamentos = agendamentoRepo.findByStatus(st);
 
-        } else if (status != null) {
-            agendamentos = agendamentoRepo.findByStatus(
-                    StatusAgendamento.valueOf(status.toUpperCase())
-            );
-
+            // 5) Sem filtros
         } else {
             agendamentos = agendamentoRepo.findAll();
         }
@@ -72,9 +108,7 @@ public class AdminAgendamentoController {
     // 2️⃣ LISTAR AGENDAMENTOS POR CLIENTE (ADMIN)
     // ==========================================================
     @GetMapping("/cliente/{clienteId}")
-    public ResponseEntity<List<AgendamentoResponse>> listarPorCliente(
-            @PathVariable Long clienteId
-    ) {
+    public ResponseEntity<List<AgendamentoResponse>> listarPorCliente(@PathVariable Long clienteId) {
 
         List<AgendamentoResponse> lista = agendamentoRepo
                 .findByClienteId(clienteId)
@@ -98,7 +132,7 @@ public class AdminAgendamentoController {
                                 .body("Agendamento cancelado não pode ser concluído");
                     }
 
-                    // ✅ regra do pagamento
+                    // Regra do pagamento
                     String modo = a.getFormaPagamentoModo(); // ONLINE ou PAGAR_NA_HORA
 
                     if (!a.isPago()) {
@@ -106,7 +140,6 @@ public class AdminAgendamentoController {
                             return ResponseEntity.badRequest()
                                     .body("Pagamento online ainda não foi confirmado");
                         }
-
                         // PAGAR_NA_HORA: concluiu => pagou
                         a.setPago(true);
                     }
@@ -121,14 +154,17 @@ public class AdminAgendamentoController {
 
     // ==========================================================
     // 4️⃣ CANCELAR AGENDAMENTO (ADMIN / BARBEIRO)
-    // 👉 envia WhatsApp automaticamente pro cliente
+    // - Cancelamento do admin não tem regra de 2h
+    // - Envia WhatsApp porque passa pelo service
     // ==========================================================
     @PatchMapping("/{id}/cancelar")
     public ResponseEntity<?> cancelar(@PathVariable Long id) {
-
-        agendamentoService.cancelarBarbeiro(id);
-
-        return ResponseEntity.noContent().build();
+        try {
+            agendamentoService.cancelarBarbeiro(id);
+            return ResponseEntity.noContent().build();
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
     }
 
     // ==========================================================
