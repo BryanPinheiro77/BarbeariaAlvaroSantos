@@ -29,8 +29,6 @@ public class AdminAgendamentoController {
 
     // ==========================================================
     // 0️⃣ CRIAR AGENDAMENTO (ADMIN)
-    // - permite escolher cliente cadastrado OU criar "na hora"
-    //   (via DTO próprio / lógica no service)
     // ==========================================================
     @PostMapping
     public ResponseEntity<AgendamentoResponse> criar(@RequestBody AdminAgendamentoCreateRequest req) {
@@ -155,26 +153,18 @@ public class AdminAgendamentoController {
     }
 
     // ==========================================================
-    // 4️⃣ CANCELAR AGENDAMENTO (ADMIN)
-    // - Admin cancela independente do tempo (a regra de 2h é só no cliente)
+    // 4️⃣ CANCELAR AGENDAMENTO (ADMIN / BARBEIRO)
+    // - Cancelamento do admin não tem regra de 2h
+    // - Envia WhatsApp porque passa pelo service
     // ==========================================================
     @PatchMapping("/{id}/cancelar")
     public ResponseEntity<?> cancelar(@PathVariable Long id) {
-
-        return agendamentoRepo.findById(id)
-                .map(a -> {
-                    if (a.getStatus() == StatusAgendamento.CONCLUIDO) {
-                        return ResponseEntity
-                                .badRequest()
-                                .body("Agendamento concluído não pode ser cancelado");
-                    }
-
-                    a.setStatus(StatusAgendamento.CANCELADO);
-                    agendamentoRepo.save(a);
-
-                    return ResponseEntity.noContent().build();
-                })
-                .orElse(ResponseEntity.notFound().build());
+        try {
+            agendamentoService.cancelarBarbeiro(id);
+            return ResponseEntity.noContent().build();
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
     }
 
     // ==========================================================
