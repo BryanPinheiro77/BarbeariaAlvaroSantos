@@ -3,12 +3,17 @@ package com.barbearia.agenda.repository;
 import com.barbearia.agenda.model.Agendamento;
 import com.barbearia.agenda.model.StatusAgendamento;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 
 public interface AgendamentoRepository extends JpaRepository<Agendamento, Long> {
+
+    // ==============================
+    // 🔍 CONSULTAS BÁSICAS
+    // ==============================
 
     List<Agendamento> findByData(LocalDate data);
 
@@ -18,7 +23,10 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, Long> 
 
     List<Agendamento> findByClienteId(Long clienteId);
 
-    // ✅ Combinações (pra seu filtro funcionar com período + status/cliente)
+    // ==============================
+    // 🔍 FILTROS COMBINADOS
+    // ==============================
+
     List<Agendamento> findByDataBetweenAndStatus(LocalDate inicio, LocalDate fim, StatusAgendamento status);
 
     List<Agendamento> findByDataBetweenAndClienteId(LocalDate inicio, LocalDate fim, Long clienteId);
@@ -30,10 +38,13 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, Long> 
             Long clienteId
     );
 
-    // ✅ Combinações adicionais úteis
     List<Agendamento> findByDataAndStatus(LocalDate data, StatusAgendamento status);
 
     List<Agendamento> findByClienteIdAndStatus(Long clienteId, StatusAgendamento status);
+
+    // ==============================
+    // ⛔ CONFLITO DE HORÁRIO
+    // ==============================
 
     boolean existsByDataAndStatusNotAndHorarioInicioLessThanAndHorarioFimGreaterThan(
             LocalDate data,
@@ -41,4 +52,17 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, Long> 
             LocalTime fimNovo,
             LocalTime inicioNovo
     );
+
+    // ==============================
+    // 🔔 LEMBRETES (SCHEDULER)
+    // ==============================
+
+    @Query("""
+        SELECT a FROM Agendamento a
+        WHERE a.status = 'AGENDADO'
+          AND a.enviadoLembrete = false
+          AND a.lembreteMinutos IS NOT NULL
+          AND a.lembreteMinutos > 0
+    """)
+    List<Agendamento> findPendentesParaLembrete();
 }
