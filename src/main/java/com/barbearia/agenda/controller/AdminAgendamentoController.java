@@ -32,39 +32,65 @@ public class AdminAgendamentoController {
             @RequestParam(required = false) String fim
     ) {
 
+        // Normaliza status (se vier vazio, trata como null)
+        StatusAgendamento st = null;
+        if (status != null && !status.isBlank()) {
+            st = StatusAgendamento.valueOf(status.toUpperCase());
+        }
+
         List<Agendamento> agendamentos;
 
-        if (inicio != null && fim != null) {
-            agendamentos = agendamentoRepo.findByDataBetween(
-                    LocalDate.parse(inicio),
-                    LocalDate.parse(fim)
-            );
+        // 1) Período (inicio/fim) tem prioridade, mas agora combina com status/cliente
+        if (inicio != null && fim != null && !inicio.isBlank() && !fim.isBlank()) {
+            LocalDate ini = LocalDate.parse(inicio);
+            LocalDate end = LocalDate.parse(fim);
 
+            if (st != null && clienteId != null) {
+                agendamentos = agendamentoRepo.findByDataBetweenAndStatusAndClienteId(ini, end, st, clienteId);
+            } else if (st != null) {
+                agendamentos = agendamentoRepo.findByDataBetweenAndStatus(ini, end, st);
+            } else if (clienteId != null) {
+                agendamentos = agendamentoRepo.findByDataBetweenAndClienteId(ini, end, clienteId);
+            } else {
+                agendamentos = agendamentoRepo.findByDataBetween(ini, end);
+            }
+
+            // 2) Data única (se vier)
+        } else if (data != null && !data.isBlank()) {
+            LocalDate d = LocalDate.parse(data);
+
+            if (st != null) {
+                agendamentos = agendamentoRepo.findByDataAndStatus(d, st);
+            } else {
+                agendamentos = agendamentoRepo.findByData(d);
+            }
+
+            // 3) Cliente (com possível status)
         } else if (clienteId != null) {
-            agendamentos = agendamentoRepo.findByClienteId(clienteId);
+            if (st != null) {
+                agendamentos = agendamentoRepo.findByClienteIdAndStatus(clienteId, st);
+            } else {
+                agendamentos = agendamentoRepo.findByClienteId(clienteId);
+            }
 
-        } else if (data != null) {
-            agendamentos = agendamentoRepo.findByData(LocalDate.parse(data));
+            // 4) Só status
+        } else if (st != null) {
+            agendamentos = agendamentoRepo.findByStatus(st);
 
-        } else if (status != null) {
-            agendamentos = agendamentoRepo.findByStatus(
-                    StatusAgendamento.valueOf(status.toUpperCase())
-            );
-
+            // 5) Sem filtros
         } else {
             agendamentos = agendamentoRepo.findAll();
         }
 
-            List<AgendamentoResponse> resposta = agendamentos.stream()
-                    .map(this::toResponse)
-                    .toList();
+        List<AgendamentoResponse> resposta = agendamentos.stream()
+                .map(this::toResponse)
+                .toList();
 
         return ResponseEntity.ok(resposta);
     }
 
     // ==========================================================
     // 2️⃣ LISTAR AGENDAMENTOS POR CLIENTE (ADMIN)
-    // (opcional, mas útil para navegação direta)
     // ==========================================================
     @GetMapping("/cliente/{clienteId}")
     public ResponseEntity<List<AgendamentoResponse>> listarPorCliente(

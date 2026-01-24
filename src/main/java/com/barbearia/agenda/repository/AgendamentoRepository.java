@@ -18,12 +18,27 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, Long> 
 
     List<Agendamento> findByClienteId(Long clienteId);
 
+    // ✅ Combinações (pra seu filtro funcionar com período + status/cliente)
+    List<Agendamento> findByDataBetweenAndStatus(LocalDate inicio, LocalDate fim, StatusAgendamento status);
+
+    List<Agendamento> findByDataBetweenAndClienteId(LocalDate inicio, LocalDate fim, Long clienteId);
+
+    List<Agendamento> findByDataBetweenAndStatusAndClienteId(
+            LocalDate inicio,
+            LocalDate fim,
+            StatusAgendamento status,
+            Long clienteId
+    );
+
+    // ✅ Combinações adicionais úteis
+    List<Agendamento> findByDataAndStatus(LocalDate data, StatusAgendamento status);
+
+    List<Agendamento> findByClienteIdAndStatus(Long clienteId, StatusAgendamento status);
+
     boolean existsByDataAndStatusNotAndHorarioInicioLessThanAndHorarioFimGreaterThan(
             LocalDate data,
             StatusAgendamento statusIgnorar,
             LocalTime fimNovo,
             LocalTime inicioNovo
     );
-
 }
-
