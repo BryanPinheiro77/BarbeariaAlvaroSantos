@@ -405,7 +405,7 @@ public class AgendamentoService {
                 "📅 Data: " + a.getData() + "\n" +
                 "⏰ Horário: " + a.getHorarioInicio() + "\n\n" +
                 "💳 " + pagoTxt + "\n" +
-                "Forma: " + tipo + " (" + modo + ")\n\n" +
-                "Se precisar alterar/cancelar, fale com a barbearia. 💈";
+                "Forma: " + tipo + "\n\n" +
+                "Você pode cancelar pelo sistema a qualquer momento! 💈";
     }
 }
