@@ -82,7 +82,7 @@ public class AgendamentoService {
 
         Agendamento salvo = agendamentoRepo.save(a);
 
-        // ✅ WhatsApp confirmação (SEM salvar no banco)
+        // ✅ WhatsApp confirmação (salvando no banco)
         try {
             String tel = cliente.getTelefone();
             if (tel != null && !tel.isBlank()) {
@@ -92,9 +92,11 @@ public class AgendamentoService {
 
                 boolean enviado = wahaClient.sendText(tel, mensagem);
 
-                if (!enviado) {
-                    System.err.println("WhatsApp não enviado (WAHA retornou false)");
-                }
+                if (enviado) {
+            salvo.setEnviadoConfirmacao(true);
+        } else {
+            System.err.println("WhatsApp não enviado (WAHA retornou false)");
+        }
             }
         } catch (Exception e) {
             System.err.println("Erro ao enviar WhatsApp de confirmação:");
