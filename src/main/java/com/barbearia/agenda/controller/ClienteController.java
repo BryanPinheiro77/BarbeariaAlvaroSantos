@@ -1,9 +1,6 @@
 package com.barbearia.agenda.controller;
 
-import com.barbearia.agenda.dto.ClienteChangePasswordRequest;
-import com.barbearia.agenda.dto.ClienteCreateRequest;
-import com.barbearia.agenda.dto.ClienteResponse;
-import com.barbearia.agenda.dto.ClienteUpdateRequest;
+import com.barbearia.agenda.dto.*;
 import com.barbearia.agenda.model.Cliente;
 import com.barbearia.agenda.repository.ClienteRepository;
 import com.barbearia.agenda.security.AuthUtils;
@@ -178,6 +175,30 @@ public class ClienteController {
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
+
+    @PatchMapping("/{id}")
+    public ResponseEntity<ClienteResponse> adminAtualizarNomeTelefone(
+            @PathVariable("id") long id,
+            @RequestBody AdminClienteUpdateRequest req
+    ) {
+        return clienteRepository.findById(id)
+                .map(cliente -> {
+                    if (req.nome() != null && !req.nome().isBlank()) {
+                        cliente.setNome(req.nome());
+                    }
+                    // telefone pode ser null para "limpar"
+                    if (req.telefone() == null || req.telefone().isBlank()) {
+                        cliente.setTelefone(null);
+                    } else {
+                        cliente.setTelefone(req.telefone());
+                    }
+
+                    Cliente atualizado = clienteRepository.save(cliente);
+                    return ResponseEntity.ok(toResponse(atualizado));
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deletarCliente(@PathVariable("id") long id) {
