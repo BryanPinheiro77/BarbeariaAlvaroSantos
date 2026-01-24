@@ -94,6 +94,7 @@ public class AgendamentoService {
 
                 if (enviado) {
             salvo.setEnviadoConfirmacao(true);
+                    agendamentoRepo.save(salvo);
         } else {
             System.err.println("WhatsApp não enviado (WAHA retornou false)");
         }
