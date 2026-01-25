@@ -22,7 +22,7 @@ public class LembreteScheduler {
         this.wahaClient = wahaClient;
     }
 
-    @Scheduled(fixedRate = 60000) // 1 minuto
+    @Scheduled(fixedDelay = 60000) // 1 minuto
     @Transactional
     public void verificarLembretes() {
 
