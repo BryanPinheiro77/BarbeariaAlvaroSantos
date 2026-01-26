@@ -1,28 +1,34 @@
 package com.barbearia.agenda.model;
 
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.*;
+
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.LocalDateTime;
 
-@Data
+@Getter @Setter
+@NoArgsConstructor
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
+@ToString(onlyExplicitlyIncluded = true)
 @Entity
 @Table(name = "agendamentos")
 public class Agendamento {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @EqualsAndHashCode.Include
+    @ToString.Include
     private Long id;
 
     private LocalDateTime expiraEm;
 
     // RELACIONAMENTOS
-    @ManyToOne
+    @ManyToOne(fetch =  FetchType.LAZY)
     @JoinColumn(name = "cliente_id")
     private Cliente cliente;
 
-    @OneToMany(mappedBy = "agendamento", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OneToMany(mappedBy = "agendamento", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private java.util.List<AgendamentoServico> servicos = new java.util.ArrayList<>();
 
     // DATA E HORÁRIOS

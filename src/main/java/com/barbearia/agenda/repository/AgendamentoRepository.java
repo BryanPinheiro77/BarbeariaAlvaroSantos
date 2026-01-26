@@ -2,6 +2,7 @@ package com.barbearia.agenda.repository;
 
 import com.barbearia.agenda.model.Agendamento;
 import com.barbearia.agenda.model.StatusAgendamento;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
@@ -15,10 +16,25 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, Long> 
     // 🔍 CONSULTAS BÁSICAS
     // ==============================
 
+    @EntityGraph(attributePaths = {
+            "cliente",
+            "servicos",
+            "servicos.servico"
+    })
     List<Agendamento> findByData(LocalDate data);
 
+    @EntityGraph(attributePaths = {
+            "cliente",
+            "servicos",
+            "servicos.servico"
+    })
     List<Agendamento> findByDataBetween(LocalDate inicio, LocalDate fim);
 
+    @EntityGraph(attributePaths = {
+            "cliente",
+            "servicos",
+            "servicos.servico"
+    })
     List<Agendamento> findByStatus(StatusAgendamento status);
 
     List<Agendamento> findByClienteId(Long clienteId);
@@ -27,6 +43,11 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, Long> 
     // 🔍 FILTROS COMBINADOS
     // ==============================
 
+    @EntityGraph(attributePaths = {
+            "cliente",
+            "servicos",
+            "servicos.servico"
+    })
     List<Agendamento> findByDataBetweenAndStatus(LocalDate inicio, LocalDate fim, StatusAgendamento status);
 
     List<Agendamento> findByDataBetweenAndClienteId(LocalDate inicio, LocalDate fim, Long clienteId);

@@ -93,8 +93,11 @@ public class AgendamentoController {
     // ====================================================================
     @GetMapping
     public ResponseEntity<List<AgendamentoResponse>> listarTodos() {
+        LocalDate fim = LocalDate.now();
+        LocalDate inicio = fim.minusDays(30);
 
-        List<AgendamentoResponse> lista = agendamentoRepo.findAll()
+        List<AgendamentoResponse> lista = agendamentoRepo
+                .findByDataBetween(inicio, fim)
                 .stream()
                 .map(this::toResponse)
                 .toList();
