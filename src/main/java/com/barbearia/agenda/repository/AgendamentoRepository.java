@@ -54,7 +54,7 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, Long> 
     );
 
     // ==============================
-    // 🔔 LEMBRETES (SCHEDULER)
+    // 🔔 LEMBRETES (SCHEDULER OTIMIZADO)
     // ==============================
 
     @Query("""
@@ -63,6 +63,7 @@ public interface AgendamentoRepository extends JpaRepository<Agendamento, Long> 
           AND a.enviadoLembrete = false
           AND a.lembreteMinutos IS NOT NULL
           AND a.lembreteMinutos > 0
+          AND a.data >= CURRENT_DATE
     """)
     List<Agendamento> findPendentesParaLembrete();
 }
