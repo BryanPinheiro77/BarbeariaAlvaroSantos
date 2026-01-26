@@ -253,7 +253,9 @@ public class AgendamentoService {
                 String msg = montarMensagemConfirmacaoAdmin(salvo);
                 boolean enviado = wahaClient.sendText(tel, msg);
 
-                if (!enviado) {
+                if (enviado) {
+                    salvo.setEnviadoConfirmacao(true);
+                } else {
                     System.err.println("WhatsApp não enviado (WAHA retornou false)");
                 }
             }

@@ -1,4 +1,4 @@
-package com.barbearia.agenda.scheduler;
+package com.barbearia.agenda.agenda.scheduler;
 
 import com.barbearia.agenda.integration.WahaClient;
 import com.barbearia.agenda.model.Agendamento;
