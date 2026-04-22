@@ -2,8 +2,7 @@ name: Restart WAHA Weekly
 
 on:
   schedule:
-    - cron: "0 7 * * 0"
-    - cron: "0 7 * * 3"
+    - cron: "0 7 * * *"
   workflow_dispatch:
 
 jobs:
