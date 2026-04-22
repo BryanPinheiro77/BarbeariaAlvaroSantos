@@ -37,6 +37,8 @@ jobs:
           EOF
           )
 
+          echo "$RESPONSE"
+
           DEPLOYMENT_ID=$(echo "$RESPONSE" | jq -r '
             .data.deployments.edges
             | map(.node)
@@ -45,6 +47,11 @@ jobs:
             | reverse
             | .[0].id
           ')
+
+          if [ -z "$DEPLOYMENT_ID" ] || [ "$DEPLOYMENT_ID" = "null" ]; then
+            echo "Nenhum deployment SUCCESS encontrado."
+            exit 1
+          fi
 
           echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> $GITHUB_ENV
 
