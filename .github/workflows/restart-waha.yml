@@ -23,7 +23,7 @@ jobs:
           SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
         run: |
           RESPONSE=$(curl -s https://backboard.railway.com/graphql/v2 \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Project-Access-Token: $RAILWAY_TOKEN" \
             -H "Content-Type: application/json" \
             --data-binary @- <<EOF
           {
@@ -53,7 +53,7 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           curl -s https://backboard.railway.com/graphql/v2 \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Project-Access-Token: $RAILWAY_TOKEN" \
             -H "Content-Type: application/json" \
             --data-binary @- <<EOF
           {
