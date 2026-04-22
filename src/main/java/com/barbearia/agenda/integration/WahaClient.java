@@ -3,17 +3,19 @@ package com.barbearia.agenda.integration;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
-import java.time.Duration;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class WahaClient {
-
-    private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${waha.base-url:http://localhost:3000}")
     private String baseUrl;
@@ -22,23 +24,40 @@ public class WahaClient {
     private String apiKey;
 
     /**
-     * Nome fixo da sessão conforme você pediu.
-     * Se quiser voltar a parametrizar depois, basta trocar por @Value("${waha.session:default}")
+     * Nome fixo da sessão.
      */
     private static final String SESSION = "default";
 
-    // Retry curto (não segura transação nem trava request por muito tempo)
-    private static final int START_RETRIES = 5;
-    private static final long START_RETRY_SLEEP_MS = 1200;
+    /**
+     * Retry curto para caso o WAHA esteja subindo.
+     */
+    private static final int START_RETRIES = 3;
+    private static final long START_RETRY_SLEEP_MS = 1000;
+
+    /**
+     * Estados considerados "bons o suficiente" para NÃO chamar /start.
+     * Ajuste se o WAHA no seu ambiente retornar outros status.
+     */
+    private static final Set<String> HEALTHY_SESSION_STATES = Set.of(
+            "WORKING",
+            "STARTING",
+            "CONNECTED",
+            "OPENING"
+    );
+
+    private final RestTemplate restTemplate;
+
+    public WahaClient() {
+        this.restTemplate = buildRestTemplate();
+    }
 
     @PostConstruct
     public void init() {
         String normalized = normalizeBaseUrl(baseUrl);
         System.out.println("WAHA: Cliente configurado em: " + normalized + " | session=" + SESSION);
 
-        // Tenta subir a sessão no start do back (melhor esforço)
         try {
-            startSessionIfNeeded();
+            ensureSessionReady();
         } catch (Exception e) {
             System.err.println("WAHA: Não foi possível validar/iniciar sessão no startup: " + e.getMessage());
         }
@@ -46,14 +65,13 @@ public class WahaClient {
 
     /**
      * Envia texto usando a sessão default.
-     * Se WAHA retornar 422 com sessão STOPPED, tenta startar e reenviar 1x.
+     * Estratégia:
+     * 1) Garante sessão pronta (sem ser agressivo)
+     * 2) Envia a mensagem
+     * 3) Se falhar por sessão parada/não pronta, tenta 1 recuperação e reenvia
      */
     public boolean sendText(String phoneNumber, String message) {
         String normalizedBase = normalizeBaseUrl(baseUrl);
-
-        // Melhor esforço: garante sessão antes de enviar (rápido)
-        startSessionIfNeeded();
-
         String url = normalizedBase + "/api/sendText";
         String formattedNumber = formatNumber(phoneNumber);
 
@@ -66,6 +84,9 @@ public class WahaClient {
         HttpHeaders headers = buildHeaders();
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
 
+        // Melhor esforço: tenta garantir que a sessão esteja pronta.
+        ensureSessionReady();
+
         try {
             ResponseEntity<String> response = restTemplate.postForEntity(url, request, String.class);
 
@@ -74,22 +95,33 @@ public class WahaClient {
                 return true;
             }
 
-            // Se veio 422, pode ser sessão parada — tenta start e reenvia 1 vez
-            if (response.getStatusCode().value() == 422) {
-                System.err.println("WAHA: 422 ao enviar. Tentando iniciar sessão e reenviar. Body=" + safeBody(response));
-                forceStartSessionWithRetry();
+            System.err.println("WAHA: Falha ao enviar. status=" + response.getStatusCode()
+                    + " body=" + safeBody(response));
 
-                ResponseEntity<String> retry = restTemplate.postForEntity(url, request, String.class);
-                if (retry.getStatusCode().is2xxSuccessful()) {
-                    System.out.println("WAHA: Mensagem enviada (após restart/start) para: " + phoneNumber);
-                    return true;
-                }
-
-                System.err.println("WAHA: Falha no reenvio. status=" + retry.getStatusCode() + " body=" + safeBody(retry));
-                return false;
+            if (shouldRetryAfterSendFailure(response.getStatusCode().value(), safeBody(response))) {
+                System.err.println("WAHA: Tentando recuperar sessão e reenviar 1x...");
+                recoverSession();
+                return retrySendOnce(url, request, phoneNumber);
             }
 
-            System.err.println("WAHA: Falha ao enviar. status=" + response.getStatusCode() + " body=" + safeBody(response));
+            return false;
+
+        } catch (HttpStatusCodeException e) {
+            int status = e.getStatusCode().value();
+            String responseBody = e.getResponseBodyAsString();
+
+            System.err.println("WAHA: Erro HTTP ao enviar. status=" + status + " body=" + responseBody);
+
+            if (shouldRetryAfterSendFailure(status, responseBody)) {
+                System.err.println("WAHA: Tentando recuperar sessão e reenviar 1x...");
+                recoverSession();
+                return retrySendOnce(url, request, phoneNumber);
+            }
+
+            return false;
+
+        } catch (ResourceAccessException e) {
+            System.err.println("WAHA: Timeout/erro de conexão ao enviar mensagem: " + e.getMessage());
             return false;
 
         } catch (RestClientException e) {
@@ -99,7 +131,7 @@ public class WahaClient {
     }
 
     /**
-     * Consulta o status da sessão default.
+     * Obtém o status da sessão default.
      * Retorna null se não conseguir consultar.
      *
      * Endpoint: GET /api/sessions/{name}
@@ -124,6 +156,15 @@ public class WahaClient {
             Object status = resp.getBody().get("status");
             return status == null ? null : status.toString();
 
+        } catch (HttpStatusCodeException e) {
+            System.err.println("WAHA: getSessionStatus HTTP=" + e.getStatusCode().value()
+                    + " body=" + e.getResponseBodyAsString());
+            return null;
+
+        } catch (ResourceAccessException e) {
+            System.err.println("WAHA: getSessionStatus timeout/conexão: " + e.getMessage());
+            return null;
+
         } catch (RestClientException e) {
             System.err.println("WAHA: Não foi possível obter status da sessão. " + e.getMessage());
             return null;
@@ -131,26 +172,47 @@ public class WahaClient {
     }
 
     /**
-     * Se a sessão não estiver WORKING, tenta startar.
-     * Não bloqueia por muito tempo e não lança erro fatal.
+     * Garante sessão pronta sem ser agressivo.
+     * Só chama /start se o status atual realmente indicar necessidade.
      */
-    public void startSessionIfNeeded() {
-        String status = getSessionStatus();
-        if ("WORKING".equalsIgnoreCase(status)) return;
+    public void ensureSessionReady() {
+        String status = normalizeStatus(getSessionStatus());
 
-        // Se status veio null (erro de rede) ou STOPPED/PAUSED/etc, tenta start com retry curto.
+        if (isHealthyStatus(status)) {
+            return;
+        }
+
+        // Se não sabemos o status, ou ele vier parado/inválido, tentamos recuperar.
+        recoverSession();
+    }
+
+    /**
+     * Faz uma recuperação conservadora da sessão.
+     */
+    private void recoverSession() {
         forceStartSessionWithRetry();
     }
 
     /**
-     * Endpoint: POST /api/sessions/{name}/start
-     * Faz retry curto porque às vezes o WAHA acabou de subir.
+     * POST /api/sessions/{name}/start
+     *
+     * Regras:
+     * - Se já estiver em estado saudável, não starta.
+     * - Se o WAHA responder "already started", trata como sucesso lógico.
+     * - Faz poucas tentativas, com pausa curta.
      */
     private void forceStartSessionWithRetry() {
         String normalizedBase = normalizeBaseUrl(baseUrl);
         String url = normalizedBase + "/api/sessions/" + SESSION + "/start";
 
         for (int i = 1; i <= START_RETRIES; i++) {
+            String currentStatus = normalizeStatus(getSessionStatus());
+
+            if (isHealthyStatus(currentStatus)) {
+                System.out.println("WAHA: Sessão já saudável antes do /start. status=" + currentStatus);
+                return;
+            }
+
             try {
                 ResponseEntity<String> resp = restTemplate.exchange(
                         url,
@@ -160,46 +222,152 @@ public class WahaClient {
                 );
 
                 if (resp.getStatusCode().is2xxSuccessful()) {
-                    // Confere se ficou WORKING
-                    String status = getSessionStatus();
-                    System.out.println("WAHA: startSession attempt=" + i + " status=" + status);
-                    if ("WORKING".equalsIgnoreCase(status)) return;
+                    String afterStatus = normalizeStatus(getSessionStatus());
+                    System.out.println("WAHA: startSession attempt=" + i + " status=" + afterStatus);
+
+                    if (isHealthyStatus(afterStatus)) {
+                        return;
+                    }
                 } else {
-                    System.err.println("WAHA: startSession attempt=" + i + " HTTP=" + resp.getStatusCode()
-                            + " body=" + (resp.getBody() == null ? "" : resp.getBody()));
+                    String body = safeBody(resp);
+
+                    if (isAlreadyStarted(resp.getStatusCode().value(), body)) {
+                        System.out.println("WAHA: Sessão já estava iniciada. Prosseguindo normalmente.");
+                        return;
+                    }
+
+                    System.err.println("WAHA: startSession attempt=" + i
+                            + " HTTP=" + resp.getStatusCode().value()
+                            + " body=" + body);
                 }
+
+            } catch (HttpStatusCodeException e) {
+                int status = e.getStatusCode().value();
+                String body = e.getResponseBodyAsString();
+
+                if (isAlreadyStarted(status, body)) {
+                    System.out.println("WAHA: Sessão já estava iniciada. Prosseguindo normalmente.");
+                    return;
+                }
+
+                System.err.println("WAHA: startSession attempt=" + i
+                        + " erro HTTP=" + status
+                        + " body=" + body);
+
+            } catch (ResourceAccessException e) {
+                System.err.println("WAHA: startSession attempt=" + i
+                        + " timeout/conexão=" + e.getMessage());
+
             } catch (RestClientException e) {
-                System.err.println("WAHA: startSession attempt=" + i + " erro=" + e.getMessage());
+                System.err.println("WAHA: startSession attempt=" + i
+                        + " erro=" + e.getMessage());
             }
 
             sleepSilently(START_RETRY_SLEEP_MS);
         }
 
-        // Melhor esforço: não derruba o fluxo
-        System.err.println("WAHA: Não conseguiu colocar a sessão em WORKING após " + START_RETRIES + " tentativas.");
+        System.err.println("WAHA: Não conseguiu colocar a sessão em estado saudável após "
+                + START_RETRIES + " tentativas.");
+    }
+
+    private boolean retrySendOnce(String url, HttpEntity<Map<String, Object>> request, String phoneNumber) {
+        try {
+            ResponseEntity<String> retry = restTemplate.postForEntity(url, request, String.class);
+
+            if (retry.getStatusCode().is2xxSuccessful()) {
+                System.out.println("WAHA: Mensagem enviada (após recuperação) para: " + phoneNumber);
+                return true;
+            }
+
+            System.err.println("WAHA: Falha no reenvio. status=" + retry.getStatusCode()
+                    + " body=" + safeBody(retry));
+            return false;
+
+        } catch (HttpStatusCodeException e) {
+            System.err.println("WAHA: Erro HTTP no reenvio. status=" + e.getStatusCode().value()
+                    + " body=" + e.getResponseBodyAsString());
+            return false;
+
+        } catch (ResourceAccessException e) {
+            System.err.println("WAHA: Timeout/erro de conexão no reenvio: " + e.getMessage());
+            return false;
+
+        } catch (RestClientException e) {
+            System.err.println("WAHA: Erro de rede no reenvio: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Decide se vale tentar recuperar sessão e reenviar.
+     */
+    private boolean shouldRetryAfterSendFailure(int statusCode, String body) {
+        if (statusCode == 422 && body != null) {
+            String b = body.toLowerCase(Locale.ROOT);
+
+            return b.contains("stopped")
+                    || b.contains("not started")
+                    || b.contains("session")
+                    || b.contains("disconnected");
+        }
+
+        return statusCode == 503 || statusCode == 502 || statusCode == 504;
+    }
+
+    /**
+     * Detecta o caso conhecido:
+     * "Session 'default' is already started"
+     */
+    private boolean isAlreadyStarted(int statusCode, String body) {
+        if (statusCode != 422 || body == null) {
+            return false;
+        }
+
+        return body.toLowerCase(Locale.ROOT).contains("already started");
+    }
+
+    private boolean isHealthyStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return false;
+        }
+        return HEALTHY_SESSION_STATES.contains(status.toUpperCase(Locale.ROOT));
+    }
+
+    private String normalizeStatus(String status) {
+        if (status == null) return null;
+        return status.trim().toUpperCase(Locale.ROOT);
     }
 
     private HttpHeaders buildHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
 
-        // WAHA usa "X-Api-Key" conforme doc
         if (apiKey != null && !apiKey.isBlank()) {
             headers.set("X-Api-Key", apiKey);
         }
+
         return headers;
+    }
+
+    private RestTemplate buildRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(3000);
+        factory.setReadTimeout(5000);
+        return new RestTemplate(factory);
     }
 
     private String normalizeBaseUrl(String raw) {
         if (raw == null) return "";
         String b = raw.trim();
 
-        // remove trailing slash
-        while (b.endsWith("/")) b = b.substring(0, b.length() - 1);
+        while (b.endsWith("/")) {
+            b = b.substring(0, b.length() - 1);
+        }
 
-        if (b.startsWith("http://") || b.startsWith("https://")) return b;
+        if (b.startsWith("http://") || b.startsWith("https://")) {
+            return b;
+        }
 
-        // default para internal
         return "http://" + b;
     }
 
