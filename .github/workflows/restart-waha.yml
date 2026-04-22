@@ -2,7 +2,7 @@ name: Restart WAHA Weekly
 
 on:
   schedule:
-    - cron: "0 7 * * 0"   # domingo 04:00 GMT-3
+    - cron: "0 7 * * 0"
   workflow_dispatch:
 
 jobs:
@@ -22,20 +22,41 @@ jobs:
           ENVIRONMENT_ID: ${{ secrets.RAILWAY_ENVIRONMENT_ID }}
           SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
         run: |
+          QUERY='query($projectId: String!, $environmentId: String!, $serviceId: String!) {
+            deployments(input: {
+              projectId: $projectId,
+              environmentId: $environmentId,
+              serviceId: $serviceId,
+              first: 10
+            }) {
+              edges {
+                node {
+                  id
+                  status
+                  createdAt
+                }
+              }
+            }
+          }'
+
+          PAYLOAD=$(jq -n \
+            --arg query "$QUERY" \
+            --arg projectId "$PROJECT_ID" \
+            --arg environmentId "$ENVIRONMENT_ID" \
+            --arg serviceId "$SERVICE_ID" \
+            '{
+              query: $query,
+              variables: {
+                projectId: $projectId,
+                environmentId: $environmentId,
+                serviceId: $serviceId
+              }
+            }')
+
           RESPONSE=$(curl -s https://backboard.railway.com/graphql/v2 \
             -H "Project-Access-Token: $RAILWAY_TOKEN" \
             -H "Content-Type: application/json" \
-            --data-binary @- <<EOF
-          {
-            "query": "query($projectId: String!, $environmentId: String!, $serviceId: String!) { deployments(input: { projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, first: 10 }) { edges { node { id status createdAt } } } }",
-            "variables": {
-              "projectId": "$PROJECT_ID",
-              "environmentId": "$ENVIRONMENT_ID",
-              "serviceId": "$SERVICE_ID"
-            }
-          }
-          EOF
-          )
+            -d "$PAYLOAD")
 
           echo "$RESPONSE"
 
@@ -59,14 +80,23 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          curl -s https://backboard.railway.com/graphql/v2 \
+          QUERY='mutation($deploymentId: String!) {
+            deploymentRestart(id: $deploymentId)
+          }'
+
+          PAYLOAD=$(jq -n \
+            --arg query "$QUERY" \
+            --arg deploymentId "$DEPLOYMENT_ID" \
+            '{
+              query: $query,
+              variables: {
+                deploymentId: $deploymentId
+              }
+            }')
+
+          RESPONSE=$(curl -s https://backboard.railway.com/graphql/v2 \
             -H "Project-Access-Token: $RAILWAY_TOKEN" \
             -H "Content-Type: application/json" \
-            --data-binary @- <<EOF
-          {
-            "query": "mutation($deploymentId: String!) { deploymentRestart(id: $deploymentId) }",
-            "variables": {
-              "deploymentId": "$DEPLOYMENT_ID"
-            }
-          }
-          EOF
+            -d "$PAYLOAD")
+
+          echo "$RESPONSE"
