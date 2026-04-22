@@ -26,8 +26,7 @@ jobs:
             deployments(input: {
               projectId: $projectId,
               environmentId: $environmentId,
-              serviceId: $serviceId,
-              first: 10
+              serviceId: $serviceId
             }) {
               edges {
                 node {
