@@ -1,0 +1,65 @@
+name: Restart WAHA Weekly
+
+on:
+  schedule:
+    - cron: "0 7 * * 0"   # domingo 04:00 GMT-3
+  workflow_dispatch:
+
+jobs:
+  restart-waha:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Get latest active deployment id
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          ENVIRONMENT_ID: ${{ secrets.RAILWAY_ENVIRONMENT_ID }}
+          SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
+        run: |
+          RESPONSE=$(curl -s https://backboard.railway.com/graphql/v2 \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @- <<EOF
+          {
+            "query": "query($projectId: String!, $environmentId: String!, $serviceId: String!) { deployments(input: { projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, first: 10 }) { edges { node { id status createdAt } } } }",
+            "variables": {
+              "projectId": "$PROJECT_ID",
+              "environmentId": "$ENVIRONMENT_ID",
+              "serviceId": "$SERVICE_ID"
+            }
+          }
+          EOF
+          )
+
+          DEPLOYMENT_ID=$(echo "$RESPONSE" | jq -r '
+            .data.deployments.edges
+            | map(.node)
+            | map(select(.status == "SUCCESS"))
+            | sort_by(.createdAt)
+            | reverse
+            | .[0].id
+          ')
+
+          echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> $GITHUB_ENV
+
+      - name: Restart deployment
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          curl -s https://backboard.railway.com/graphql/v2 \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @- <<EOF
+          {
+            "query": "mutation($deploymentId: String!) { deploymentRestart(id: $deploymentId) }",
+            "variables": {
+              "deploymentId": "$DEPLOYMENT_ID"
+            }
+          }
+          EOF
