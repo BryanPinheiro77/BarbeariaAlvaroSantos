@@ -18,21 +18,27 @@ public class AdminAgendamentoController {
 
     private final AgendamentoRepository agendamentoRepo;
     private final AgendamentoService agendamentoService;
+    private final com.barbearia.agenda.service.BookingRequests bookingRequests;
 
     public AdminAgendamentoController(
             AgendamentoRepository agendamentoRepo,
-            AgendamentoService agendamentoService
+            AgendamentoService agendamentoService,
+            com.barbearia.agenda.service.BookingRequests bookingRequests
     ) {
         this.agendamentoRepo = agendamentoRepo;
         this.agendamentoService = agendamentoService;
+        this.bookingRequests = bookingRequests;
     }
 
     // ==========================================================
     // 0️⃣ CRIAR AGENDAMENTO (ADMIN)
     // ==========================================================
     @PostMapping
-    public ResponseEntity<AgendamentoResponse> criar(@RequestBody AdminAgendamentoCreateRequest req) {
-        Agendamento a = agendamentoService.criarAdmin(req);
+    public ResponseEntity<AgendamentoResponse> criar(@RequestBody AdminAgendamentoCreateRequest req,
+            org.springframework.security.core.Authentication auth,
+            @RequestHeader(value = "Idempotency-Key", required = false) String key) {
+        Agendamento a = bookingRequests.execute("ADMIN:" + auth.getName(), key, req.data(), req.toString(),
+                () -> agendamentoService.criarAdmin(req));
         return ResponseEntity.ok(toResponse(a));
     }
 
