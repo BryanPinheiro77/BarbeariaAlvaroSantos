@@ -31,6 +31,9 @@ public class SecurityConfig {
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(csrf -> csrf.disable())
+                .exceptionHandling(errors -> errors
+                        .authenticationEntryPoint((req, res, ex) -> res.sendError(401))
+                        .accessDeniedHandler((req, res, ex) -> res.sendError(403)))
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
@@ -38,7 +41,7 @@ public class SecurityConfig {
                         // =========================
                         // ROTAS PÚBLICAS
                         // =========================
-                        .requestMatchers("/auth/login", "/clientes/registrar").permitAll()
+                        .requestMatchers("/auth/login", "/auth/refresh", "/auth/logout", "/clientes/registrar").permitAll()
                         .requestMatchers(HttpMethod.GET, "/servicos/ativos").permitAll()
                         .requestMatchers("/pagamentos/webhook", "/pagamentos/webhook/**").permitAll()
                         .requestMatchers("/agendamentos/horarios-disponiveis").permitAll()
