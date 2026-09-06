@@ -9,11 +9,49 @@ CREATE TABLE IF NOT EXISTS booking_requests (
 );
 -- No public Data API policies: only the JDBC owner can read/write idempotency records.
 ALTER TABLE booking_requests ENABLE ROW LEVEL SECURITY;
--- Abort on existing overlaps; resolve them explicitly before applying. No records are deleted.
--- Current application has a single calendar. Multiple barbers require a resource dimension.
-ALTER TABLE agendamentos ADD CONSTRAINT agendamentos_valid_interval
-    CHECK (data IS NOT NULL AND horario_inicio IS NOT NULL AND horario_fim IS NOT NULL AND horario_fim > horario_inicio);
-ALTER TABLE agendamentos ADD CONSTRAINT agendamentos_no_overlap
-    EXCLUDE USING gist (tsrange(data + horario_inicio, data + horario_fim, '[)') WITH &&)
-    WHERE (status <> 'CANCELADO');
+-- Keep legacy duplicates unchanged, but reject every new overlapping booking.
+-- The advisory lock also serializes direct concurrent inserts outside the application.
+CREATE OR REPLACE FUNCTION public.prevent_agendamento_overlap()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF NEW.data IS NULL
+       OR NEW.horario_inicio IS NULL
+       OR NEW.horario_fim IS NULL
+       OR NEW.horario_fim <= NEW.horario_inicio THEN
+        RAISE EXCEPTION 'Intervalo de agendamento inválido'
+            USING ERRCODE = '23514';
+    END IF;
+
+    IF NEW.status <> 'CANCELADO' THEN
+        PERFORM pg_advisory_xact_lock(
+            hashtextextended('calendar:' || NEW.data::text, 0)
+        );
+
+        IF EXISTS (
+            SELECT 1
+              FROM public.agendamentos existing
+             WHERE existing.id IS DISTINCT FROM NEW.id
+               AND existing.data = NEW.data
+               AND existing.status <> 'CANCELADO'
+               AND existing.horario_inicio < NEW.horario_fim
+               AND existing.horario_fim > NEW.horario_inicio
+        ) THEN
+            RAISE EXCEPTION 'Horário já reservado'
+                USING ERRCODE = '23P01';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS prevent_agendamento_overlap ON public.agendamentos;
+CREATE TRIGGER prevent_agendamento_overlap
+BEFORE INSERT OR UPDATE OF data, horario_inicio, horario_fim
+ON public.agendamentos
+FOR EACH ROW
+EXECUTE FUNCTION public.prevent_agendamento_overlap();
 COMMIT;

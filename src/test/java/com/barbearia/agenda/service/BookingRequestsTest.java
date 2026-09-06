@@ -37,7 +37,12 @@ class BookingRequestsTest {
         jdbc = new JdbcTemplate(ds);
         tx = new TransactionTemplate(new DataSourceTransactionManager(ds));
         jdbc.execute("CREATE TABLE agendamentos(id bigserial primary key, data date, horario_inicio time, horario_fim time, status varchar(40))");
-        jdbc.execute(Files.readString(Path.of("db/migrations/002_booking_requests.sql")));
+        // Production already contains overlapping legacy rows; migration must preserve them.
+        jdbc.update("INSERT INTO agendamentos(data,horario_inicio,horario_fim,status) VALUES ('2026-01-22','18:00','18:30','CONCLUIDO'),('2026-01-22','18:00','18:30','CONCLUIDO')");
+        String migration = Files.readString(Path.of("db/migrations/002_booking_requests.sql"))
+                .replace("public.", schema + ".")
+                .replace("search_path = public,", "search_path = " + schema + ",");
+        jdbc.execute(migration);
         var repo = mock(AgendamentoRepository.class);
         when(repo.findById(anyLong())).thenAnswer(call -> {
             long id = call.getArgument(0);
@@ -62,7 +67,7 @@ class BookingRequestsTest {
             var a = executor.submit(run); var b = executor.submit(run);
             assertEquals(a.get(10, TimeUnit.SECONDS), b.get(10, TimeUnit.SECONDS));
         } finally { executor.shutdownNow(); }
-        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM agendamentos", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM agendamentos WHERE data=?", Integer.class, date));
         var error = assertThrows(ResponseStatusException.class, () -> create(key, "different", "11:00", "11:30"));
         assertEquals(409, error.getStatusCode().value());
     }
@@ -82,7 +87,7 @@ class BookingRequestsTest {
         create(UUID.randomUUID().toString(), "adjacent", "10:30", "11:00");
         jdbc.update("UPDATE agendamentos SET status='CANCELADO'");
         create(UUID.randomUUID().toString(), "released", "10:00", "10:30");
-        assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM agendamentos", Integer.class));
+        assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM agendamentos WHERE data=?", Integer.class, date));
     }
     @Test void missingKeyStillProtectsCalendarAndInvalidKeyIsRejected() {
         create(null, "payload", "10:00", "10:30");
