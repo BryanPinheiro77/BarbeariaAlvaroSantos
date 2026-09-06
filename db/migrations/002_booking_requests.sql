@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS booking_requests (
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (scope, request_key)
 );
+-- No public Data API policies: only the JDBC owner can read/write idempotency records.
+ALTER TABLE booking_requests ENABLE ROW LEVEL SECURITY;
 -- Abort on existing overlaps; resolve them explicitly before applying. No records are deleted.
 -- Current application has a single calendar. Multiple barbers require a resource dimension.
 ALTER TABLE agendamentos ADD CONSTRAINT agendamentos_valid_interval
