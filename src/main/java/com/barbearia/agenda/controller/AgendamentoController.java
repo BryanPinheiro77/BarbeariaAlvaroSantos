@@ -28,13 +28,15 @@ public class AgendamentoController {
     private final ServicoRepository servicoRepo;
     private final HorarioBarbeiroRepository horarioRepo;
     private final AgendamentoService agendamentoService;
+    private final com.barbearia.agenda.service.BookingRequests bookingRequests;
 
     public AgendamentoController(
             AgendamentoRepository agendamentoRepo,
             ClienteRepository clienteRepo,
             ServicoRepository servicoRepo,
             HorarioBarbeiroRepository horarioRepo,
-            AgendamentoService agendamentoService
+            AgendamentoService agendamentoService,
+            com.barbearia.agenda.service.BookingRequests bookingRequests
 
     ) {
         this.agendamentoRepo = agendamentoRepo;
@@ -42,6 +44,7 @@ public class AgendamentoController {
         this.servicoRepo = servicoRepo;
         this.horarioRepo = horarioRepo;
         this.agendamentoService = agendamentoService;
+        this.bookingRequests = bookingRequests;
     }
 
     // ====================================================================
@@ -50,14 +53,16 @@ public class AgendamentoController {
     @PostMapping
     public ResponseEntity<?> criar(
             @RequestBody AgendamentoCreateRequest req,
-            Authentication auth
+            Authentication auth,
+            @RequestHeader(value = "Idempotency-Key", required = false) String key
     ) {
         if (auth == null) {
             return ResponseEntity.status(401).body("Usuário não autenticado");
         }
 
         String email = auth.getName();
-        Agendamento a = agendamentoService.criar(req, email);
+        Agendamento a = bookingRequests.execute("CLIENTE:" + email, key, req.data(), req.toString(),
+                () -> agendamentoService.criar(req, email));
         return ResponseEntity.ok(toResponse(a));
     }
 

@@ -334,6 +334,10 @@ public class AgendamentoService {
     }
 
     private void validarConflito(java.time.LocalDate data, LocalTime inicio, LocalTime fim) {
+        if (data == null || inicio == null || fim == null || !fim.isAfter(inicio)) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "O agendamento deve começar e terminar no mesmo dia");
+        }
         boolean conflito = agendamentoRepo
                 .existsByDataAndStatusNotAndHorarioInicioLessThanAndHorarioFimGreaterThan(
                         data,
@@ -343,7 +347,7 @@ public class AgendamentoService {
                 );
 
         if (conflito) {
-            throw new RuntimeException("Horário já reservado!");
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT, "Horário já reservado!");
         }
     }
 
